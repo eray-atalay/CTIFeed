@@ -1,0 +1,18 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/Header.astro';
+import Metrics from '../components/Metrics.astro';
+import Toolbar from '../components/Toolbar.astro';
+import FeedGrid from '../components/FeedGrid.astro';
+import Modals from '../components/Modals.astro';
+---
+
+<Layout title="CTIFeed Tehdit Radarı | Siber Tehdit İstihbaratı ve Önceliklendirme">
+  <Header />
+  <main class="main-container">
+    <Metrics />
+    <Toolbar />
+    <FeedGrid />
+  </main>
+  <Modals />
+</Layout>

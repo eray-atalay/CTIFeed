@@ -939,3 +939,16 @@ button {
     grid-template-columns: 1fr;
   }
 }
+/*Telegram bot*/
+
+.btn-telegram {
+  background: #152336;
+  border-color: #233a59;
+  color: #60a5fa;
+}
+
+.btn-telegram:hover {
+  background: #1c2e47;
+  border-color: #3b82f6;
+  color: #93c5fd;
+}

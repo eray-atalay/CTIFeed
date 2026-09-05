@@ -8,16 +8,17 @@ import (
 
 // Config, uygulama yapılandırma ayarlarını temsil eder.
 type Config struct {
-	Sources      []model.FeedSource
-	DBPath       string
-	Workers      int
-	Timeout      time.Duration
-	Interval     time.Duration
-	MaxAgeHours  time.Duration
-	DaemonMode   bool
-	TopArticles  int
-	MinScore     int
-	UserAgent    string
+	Sources       []model.FeedSource
+	DBPath        string
+	Workers       int
+	Timeout       time.Duration
+	Interval      time.Duration
+	MaxAgeHours   time.Duration
+	DaemonMode    bool
+	TopArticles   int
+	MinScore      int
+	UserAgent     string
+	TelegramToken string // Burayı ekle
 }
 
 // DefaultSources, önceden tanımlanmış 18 CTI tehdit besleme kaynağını döndürür.
@@ -47,15 +48,16 @@ func DefaultSources() []model.FeedSource {
 // NewDefaultConfig, varsayılan çalışma yapılandırmasını oluşturur.
 func NewDefaultConfig() *Config {
 	return &Config{
-		Sources:     DefaultSources(),
-		DBPath:      "ctifeed.db",
-		Workers:     5,
-		Timeout:     10 * time.Second,
-		Interval:    15 * time.Minute,
-		MaxAgeHours: 48 * time.Hour,
-		DaemonMode:  false,
-		TopArticles: 10,
-		MinScore:    0,
-		UserAgent:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+		Sources:       DefaultSources(),
+		DBPath:        "ctifeed.db",
+		Workers:       5,
+		Timeout:       10 * time.Second,
+		Interval:      15 * time.Minute,
+		MaxAgeHours:   48 * time.Hour,
+		DaemonMode:    false,
+		TopArticles:   10,
+		MinScore:      0,
+		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+		TelegramToken: "", // Burayı ekle
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"ctifeed/internal/collector"
 	"ctifeed/internal/config"
+	"ctifeed/internal/model"
 	"ctifeed/internal/storage"
 	"ctifeed/web"
 )
@@ -22,8 +23,11 @@ type Server struct {
 	cfg       *config.Config
 	db        *storage.DB
 	collector *collector.Collector
-	scanMu    sync.Mutex
-	server    *http.Server
+	notifier  interface {
+		DispatchAlert(ctx context.Context, articles []*model.Article)
+	}
+	scanMu sync.Mutex
+	server *http.Server
 }
 
 // NewServer, yeni bir API ve Web sunucusu örneği oluşturur.
@@ -59,6 +63,13 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	}
 
 	return s
+}
+
+// SetNotifier, bot veya alert mekanizmasını sunucuya bağlar.
+func (s *Server) SetNotifier(n interface {
+	DispatchAlert(ctx context.Context, articles []*model.Article)
+}) {
+	s.notifier = n
 }
 
 // Start, HTTP sunucusunu dinlemeye başlatır.
@@ -164,6 +175,10 @@ func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	res := s.collector.CollectAll(r.Context())
 	inserted, skipped, err := s.db.SaveArticles(r.Context(), res.Articles)
+	// Yeni eklenen haber varsa abonelere Telegram'dan ilet
+	if inserted > 0 && s.notifier != nil {
+		s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+	}
 	if err != nil {
 		slog.Error("Database save error during scan", slog.String("error", err.Error()))
 	}
@@ -195,5 +210,8 @@ func (s *Server) TriggerScan(ctx context.Context) (int, int, error) {
 	}
 
 	inserted, skipped, err := s.db.SaveArticles(ctx, res.Articles)
+	if inserted > 0 && s.notifier != nil {
+		s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+	}
 	return inserted, skipped, err
 }

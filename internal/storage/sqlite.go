@@ -71,6 +71,15 @@ func (d *DB) migrate(ctx context.Context) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_score ON articles(score DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at DESC);`,
+
+		// migrate fonksiyonundaki queries diliminin içine ekle:
+		`CREATE TABLE IF NOT EXISTS user_subscriptions (
+            chat_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (chat_id, tag)
+        );`,
+		`CREATE INDEX IF NOT EXISTS idx_subscriptions_tag ON user_subscriptions(tag);`,
 	}
 
 	for _, q := range queries {
@@ -379,9 +388,9 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 // Stats, toplanan haberlerin istatistik özetini barındırır.
 type Stats struct {
 	TotalArticles           int `json:"total_articles"`
-	HighPriorityCount       int `json:"high_priority_count"` // Puan >= 50 olanlar
+	HighPriorityCount       int `json:"high_priority_count"`      // Puan >= 50 olanlar
 	CriticalVulnerabilities int `json:"critical_vulnerabilities"` // CVE içeren etiketler
-	TRFocusCount            int `json:"tr_focus_count"` // TR-Focus etiketli olanlar
+	TRFocusCount            int `json:"tr_focus_count"`           // TR-Focus etiketli olanlar
 }
 
 // GetStats, toplanan haberler hakkında istatistiksel özetleri döndürür.
@@ -401,4 +410,79 @@ func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 	}
 
 	return s, nil
+}
+
+// ToggleSubscription, kullanıcının seçtiği etiketi açar veya kapatır.
+func (d *DB) ToggleSubscription(ctx context.Context, chatID int64, tag string) (bool, error) {
+	tag = strings.ToLower(strings.TrimSpace(tag))
+
+	var exists int
+	err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_subscriptions WHERE chat_id = ? AND tag = ?", chatID, tag).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("abonelik kontrol hatasi: %w", err)
+	}
+
+	if exists > 0 {
+		_, err := d.conn.ExecContext(ctx, "DELETE FROM user_subscriptions WHERE chat_id = ? AND tag = ?", chatID, tag)
+		return false, err
+	}
+
+	_, err = d.conn.ExecContext(ctx,
+		"INSERT INTO user_subscriptions (chat_id, tag, created_at) VALUES (?, ?, ?)",
+		chatID, tag, time.Now().UTC().Format(time.RFC3339),
+	)
+	return true, err
+}
+
+// GetUserSubscriptions, kullanıcının aktif aboneliklerini listeler.
+func (d *DB) GetUserSubscriptions(ctx context.Context, chatID int64) ([]string, error) {
+	rows, err := d.conn.QueryContext(ctx, "SELECT tag FROM user_subscriptions WHERE chat_id = ?", chatID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err == nil {
+			tags = append(tags, tag)
+		}
+	}
+	return tags, nil
+}
+
+// GetSubscribersForTags, gelen haberin etiketlerine abone olan kişilerin chat_id'lerini döner.
+func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64, error) {
+	if len(tags) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(tags))
+	args := make([]any, len(tags))
+	for i, t := range tags {
+		placeholders[i] = "?"
+		args[i] = strings.ToLower(strings.TrimSpace(t))
+	}
+
+	query := fmt.Sprintf(`
+		SELECT DISTINCT chat_id 
+		FROM user_subscriptions 
+		WHERE tag IN (%s);
+	`, strings.Join(placeholders, ","))
+
+	rows, err := d.conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chatIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			chatIDs = append(chatIDs, id)
+		}
+	}
+	return chatIDs, nil
 }

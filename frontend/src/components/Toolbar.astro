@@ -1,0 +1,72 @@
+---
+// Toolbar.astro - Arama ve Filtreleme Araç Çubuğu (Sıfır Emoji)
+---
+
+<section class="toolbar-section">
+  <div class="search-bar-wrap">
+    <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+    <input 
+      type="text" 
+      id="search-input" 
+      placeholder="CVE kodu, zafiyet, zararli yazilim, tehdit aktoru veya anahtar kelime ile arayin..." 
+      autocomplete="off"
+    />
+    <button id="search-clear-btn" class="search-clear hidden" title="Aramayi temizle">&times;</button>
+  </div>
+
+  <div class="filters-row">
+    <!-- Hizli Etiket Haplari -->
+    <div class="pills-scroll" id="tag-pills">
+      <button class="pill active" data-tag="">Tum Beslemeler</button>
+      <button class="pill pill-tr" data-tag="TR-Focus">TR-Focus (+50)</button>
+      <button class="pill pill-alert" data-tag="zero-day">Zero-Day</button>
+      <button class="pill pill-ransom" data-tag="ransomware">Ransomware</button>
+      <button class="pill pill-rce" data-tag="rce">RCE</button>
+      <button class="pill" data-tag="wordpress">WordPress</button>
+      <button class="pill" data-tag="fortinet">Fortinet</button>
+      <button class="pill" data-tag="cisco">Cisco</button>
+      <button class="pill" data-tag="vmware">VMware</button>
+      <button class="pill" data-tag="microsoft-exchange">Exchange</button>
+      <button class="pill" data-tag="data-breach">Veri Sizintisi</button>
+    </div>
+
+    <div class="filter-dropdowns">
+      <div class="select-wrapper">
+        <select id="source-select" aria-label="Kaynaga Gore Filtrele">
+          <option value="">Tum Kaynaklar</option>
+        </select>
+      </div>
+
+      <div class="select-wrapper">
+        <select id="score-select" aria-label="Minimum Skora Gore Filtrele">
+          <option value="0">Tum Skorlar (0+)</option>
+          <option value="30">Orta ve Uzeri (30+)</option>
+          <option value="50">Yuksek ve Kritik (50+)</option>
+          <option value="70">Yalnizca Kritik (70+)</option>
+        </select>
+      </div>
+
+      <div class="select-wrapper">
+        <select id="sort-select" aria-label="Siralama Duzeni">
+          <option value="score">En Yuksek Oncelik</option>
+          <option value="date">En Yeni Tarih</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Tarama Bildirimi -->
+<div id="scan-banner" class="scan-banner hidden">
+  <div class="spinner-small"></div>
+  <span id="scan-banner-text">18 CTI kaynagina baglaniliyor ve istihbarat analiz ediliyor...</span>
+</div>
+
+<!-- Aktif Filtre Durumu -->
+<div class="active-filter-bar hidden" id="active-filter-bar">
+  <span>Filtrelenen Kriter: <strong id="filter-summary-text"></strong></span>
+  <button id="btn-reset-filters" class="btn-link">Tum filtreleri sifirla</button>
+</div>

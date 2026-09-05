@@ -1,0 +1,61 @@
+package config
+
+import (
+	"time"
+
+	"ctifeed/internal/model"
+)
+
+// Config, uygulama yapılandırma ayarlarını temsil eder.
+type Config struct {
+	Sources      []model.FeedSource
+	DBPath       string
+	Workers      int
+	Timeout      time.Duration
+	Interval     time.Duration
+	MaxAgeHours  time.Duration
+	DaemonMode   bool
+	TopArticles  int
+	MinScore     int
+	UserAgent    string
+}
+
+// DefaultSources, önceden tanımlanmış 18 CTI tehdit besleme kaynağını döndürür.
+func DefaultSources() []model.FeedSource {
+	return []model.FeedSource{
+		{Name: "The Hacker News", URL: "https://feeds.feedburner.com/TheHackersNews", Category: "General Security"},
+		{Name: "BleepingComputer", URL: "https://www.bleepingcomputer.com/feed/", Category: "Vulnerability & Ransomware"},
+		{Name: "SecurityWeek", URL: "https://www.securityweek.com/feed/", Category: "Enterprise Security"},
+		{Name: "The DFIR Report", URL: "https://thedfirreport.com/feed/", Category: "DFIR & Intrusions"},
+		{Name: "Unit 42", URL: "https://unit42.paloaltonetworks.com/feed/", Category: "Threat Research"},
+		{Name: "Securelist", URL: "https://securelist.com/feed/", Category: "Kaspersky Research"},
+		{Name: "Cisco Talos", URL: "https://blog.talosintelligence.com/rss/", Category: "Threat Intelligence"},
+		{Name: "The Record", URL: "https://therecord.media/feed", Category: "Cyber News"},
+		{Name: "Dark Reading", URL: "https://www.darkreading.com/rss.xml", Category: "Enterprise Defense"},
+		{Name: "Microsoft Threat Intelligence", URL: "https://www.microsoft.com/en-us/security/blog/topic/threat-intelligence/feed/", Category: "Cloud & OS Security"},
+		{Name: "CyberScoop", URL: "https://cyberscoop.com/feed/", Category: "Government & Policy"},
+		{Name: "HackRead Data Breaches", URL: "https://hackread.com/category/data-breaches/feed/", Category: "Data Breaches"},
+		{Name: "GBHackers Cyber Attack", URL: "https://gbhackers.com/category/cyber-attack/feed/", Category: "Attacks & Exploits"},
+		{Name: "Infosecurity Magazine", URL: "https://www.infosecurity-magazine.com/rss/news/", Category: "InfoSec News"},
+		{Name: "Rapid7 Blog", URL: "https://www.rapid7.com/blog/rss/", Category: "Vulnerability Research"},
+		{Name: "Krebs on Security", URL: "https://krebsonsecurity.com/category/data-breaches/feed/", Category: "Investigative Security"},
+		{Name: "DarkWebInformer", URL: "https://darkwebinformer.com/rss/", Category: "Dark Web & Leaks"},
+		{Name: "DailyDarkWeb", URL: "https://dailydarkweb.net/feed/", Category: "Dark Web & Leaks"},
+	}
+}
+
+// NewDefaultConfig, varsayılan çalışma yapılandırmasını oluşturur.
+func NewDefaultConfig() *Config {
+	return &Config{
+		Sources:     DefaultSources(),
+		DBPath:      "ctifeed.db",
+		Workers:     5,
+		Timeout:     10 * time.Second,
+		Interval:    15 * time.Minute,
+		MaxAgeHours: 48 * time.Hour,
+		DaemonMode:  false,
+		TopArticles: 10,
+		MinScore:    0,
+		UserAgent:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	}
+}

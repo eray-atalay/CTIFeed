@@ -1,0 +1,25 @@
+# Versiyon kontrolu
+.git
+.gitignore
+
+# Go derleme cikti ve artiklari
+bin/
+*.exe
+*.test
+*.out
+
+# Veritabanlari ve calisma zamani verileri
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# On yuz gelistirme ve derleme dosyalari
+frontend/node_modules/
+frontend/.astro/
+frontend/dist/
+node_modules/
+
+# Gunluk kayitlari ve gecici dosyalar
+*.log
+scratch/

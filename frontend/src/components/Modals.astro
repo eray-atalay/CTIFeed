@@ -1,0 +1,71 @@
+---
+// Modals.astro - Tehdit Detayı ve Kaynaklar Modalı (Sıfır Emoji)
+---
+
+<!-- Tehdit Detay Modali -->
+<div class="modal-overlay hidden" id="article-modal" role="dialog" aria-modal="true">
+  <div class="modal-card">
+    <button class="modal-close" id="modal-close-btn" aria-label="Modali Kapat">&times;</button>
+    
+    <div class="modal-header">
+      <div class="modal-meta-row">
+        <span class="modal-source" id="modal-source">Kaynak</span>
+        <span class="modal-date" id="modal-date">Tarih</span>
+        <span class="score-badge" id="modal-score-badge">0 PUAN</span>
+      </div>
+      <h2 class="modal-title" id="modal-title">Haber Basligi</h2>
+    </div>
+
+    <div class="modal-body">
+      <div class="breakdown-box">
+        <h4>Oncelik Puani Dagilimi</h4>
+        <div class="breakdown-list" id="modal-breakdown">
+          <!-- JS tarafindan doldurulur -->
+        </div>
+      </div>
+
+      <div class="modal-tags-wrap">
+        <h4>Tespit Edilen Etiketler ve CVE Kodlari</h4>
+        <div class="tags-container" id="modal-tags">
+          <!-- JS tarafindan doldurulur -->
+        </div>
+      </div>
+
+      <div class="modal-summary-box">
+        <h4>Istihbarat Ozeti</h4>
+        <p id="modal-summary-text"></p>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-secondary" id="modal-close-footer">Kapat</button>
+      <a href="#" target="_blank" rel="noopener noreferrer" class="btn-primary" id="modal-link-btn">
+        <span>Tam Raporu Incele</span>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- Izlenen Kaynaklar Modali -->
+<div class="modal-overlay hidden" id="sources-modal" role="dialog" aria-modal="true">
+  <div class="modal-card modal-card-wide">
+    <button class="modal-close" id="sources-close-btn" aria-label="Modali Kapat">&times;</button>
+    <div class="modal-header">
+      <h2>Izlenen CTI Besleme Kaynaklari (18)</h2>
+      <p class="modal-sub">Siber tehditler, kritik sistem zafiyetleri ve Turkiye odagi icin surekli analiz edilen kaynaklar.</p>
+    </div>
+    <div class="sources-list" id="sources-list-container">
+      <!-- JS tarafindan doldurulur -->
+    </div>
+  </div>
+</div>
+
+<!-- Alt Bilgi (Footer) -->
+<footer class="app-footer">
+  <p>CTIFeed Siber Tehdit Radari - Go &amp; Astro Mimarisi</p>
+</footer>

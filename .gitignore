@@ -1,0 +1,28 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Go test artifacts
+*.test
+*.out
+
+# Frontend
+node_modules/
+frontend/node_modules/
+frontend/.astro/
+frontend/dist/
+.astro/
+
+# Data
+data/
+*.log
+scratch/

@@ -16,6 +16,7 @@ services:
       - INTERVAL=15m
       - WORKERS=5
       - TIMEOUT=10s
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
       interval: 30s

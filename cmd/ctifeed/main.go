@@ -17,16 +17,17 @@ import (
 	"ctifeed/internal/api"
 	"ctifeed/internal/collector"
 	"ctifeed/internal/config"
+	"ctifeed/internal/notifier"
 	"ctifeed/internal/storage"
 )
 
 const banner = `
 ========================================================================
-   ____ _____ ___   _____             _   ____        _     
-  / ___|_   _|_ _| |  ___|__  ___  __| | | __ )  ___ | |_   
- | |     | |  | |  | |_ / _ \/ _ \/ _` + "`" + ` | |  _ \ / _ \| __|  
- | |___  | |  | |  |  _|  __/  __/ (_| | | |_) | (_) | |_   
-  \____| |_| |___| |_|  \___|\___|\__,_| |____/ \___/ \__|  
+    ____ _____ ___   _____             _   ____        _     
+   / ___|_   _|_ _| |  ___|__  ___  __| | | __ )  ___ | |_   
+  | |     | |  | |  | |_ / _ \/ _ \/ _` + "`" + ` | |  _ \ / _ \| __|  
+  | |___  | |  | |  |  _|  __/  __/ (_| | | |_) | (_) | |_   
+   \____| |_| |___| |_|  \___|\___|\__,_| |____/ \___/ \__|  
   Cyber Threat Intelligence Feed Collector & ThreatRadar Web UI
 ========================================================================
 `
@@ -43,8 +44,14 @@ func main() {
 	flag.StringVar(&cfg.DBPath, "db", "ctifeed.db", "Path to SQLite database file")
 	flag.IntVar(&cfg.TopArticles, "top", 10, "Number of top-priority articles to display in CLI report")
 	flag.IntVar(&cfg.MinScore, "min-score", 0, "Minimum score filter for CLI report display")
+	flag.StringVar(&cfg.TelegramToken, "telegram-token", "", "Telegram Bot API Token")
 	verbose := flag.Bool("verbose", false, "Enable verbose debug logs")
 	flag.Parse()
+
+	// Ortam değişkeninden token kontrolü (CLI bayrağı verilmemişse)
+	if envTG := os.Getenv("TELEGRAM_BOT_TOKEN"); envTG != "" && cfg.TelegramToken == "" {
+		cfg.TelegramToken = envTG
+	}
 
 	// Konteyner/bulut ortamı için ortam değişkenlerini oku
 	if envPort := os.Getenv("PORT"); envPort != "" && *port == "8080" {
@@ -94,6 +101,16 @@ func main() {
 
 	col := collector.New(cfg)
 
+	// Telegram botunu başlat (Token varsa aktifleşir, yoksa nil döner)
+	tgBot, err := notifier.NewTelegramBot(cfg.TelegramToken, db)
+	if err != nil {
+		slog.Error("Telegram bot başlatılamadı", slog.String("error", err.Error()))
+	} else if tgBot != nil {
+		tgBot.Start()
+		defer tgBot.Stop()
+		slog.Info("Telegram bildirim servisi devrede")
+	}
+
 	// Zarif kapatma (graceful shutdown) dinleyicisini yapılandır
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -110,7 +127,7 @@ func main() {
 			cancel()
 		}()
 
-		runCollectionCycle(ctx, col, db, cfg)
+		runCollectionCycle(ctx, col, db, cfg, tgBot)
 
 		if !cfg.DaemonMode {
 			slog.Info("Single run completed successfully. Exiting.")
@@ -128,7 +145,7 @@ func main() {
 				return
 			case <-ticker.C:
 				slog.Info("Scheduled ticker triggered. Starting feed collection cycle...")
-				runCollectionCycle(ctx, col, db, cfg)
+				runCollectionCycle(ctx, col, db, cfg, tgBot)
 			}
 		}
 	}
@@ -136,6 +153,10 @@ func main() {
 	// Varsayılan: Modern Web Paneli Sunucusunu çalıştır
 	addr := ":" + *port
 	server := api.NewServer(cfg, db, col, addr)
+
+	if tgBot != nil {
+		server.SetNotifier(tgBot)
+	}
 
 	// Veritabanında makale olup olmadığını kontrol et; 0 ise arka planda ilk taramayı başlat
 	stats, err := db.GetStats(ctx)
@@ -196,7 +217,7 @@ func main() {
 	}
 }
 
-func runCollectionCycle(ctx context.Context, col *collector.Collector, db *storage.DB, cfg *config.Config) {
+func runCollectionCycle(ctx context.Context, col *collector.Collector, db *storage.DB, cfg *config.Config, tgBot *notifier.TelegramBot) {
 	cycleStart := time.Now()
 	slog.Info(">>> Starting CTI feed collection cycle")
 
@@ -224,6 +245,11 @@ func runCollectionCycle(ctx context.Context, col *collector.Collector, db *stora
 			slog.Int("new_inserted", inserted),
 			slog.Int("duplicates_skipped", skipped),
 		)
+
+		// CLI modunda da yeni eklenen haberleri Telegram abonelerine ilet
+		if inserted > 0 && tgBot != nil {
+			tgBot.DispatchAlert(ctx, res.Articles[:inserted])
+		}
 	}
 
 	printReport(ctx, db, cfg, cycleStart)

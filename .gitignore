@@ -26,3 +26,5 @@ frontend/dist/
 data/
 *.log
 scratch/
+
+.env

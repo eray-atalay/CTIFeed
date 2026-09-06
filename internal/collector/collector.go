@@ -12,6 +12,7 @@ import (
 	"github.com/mmcdole/gofeed"
 
 	"ctifeed/internal/config"
+	"ctifeed/internal/ioc"
 	"ctifeed/internal/model"
 	"ctifeed/internal/scorer"
 )
@@ -217,15 +218,6 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 			pubDate = time.Now().UTC()
 		}
 
-		cleanSummary := scorer.StripHTML(item.Description)
-		if cleanSummary == "" && item.Content != "" {
-			cleanSummary = scorer.StripHTML(item.Content)
-		}
-		// Önizleme için aşırı uzun özetleri kısalt
-		if len(cleanSummary) > 500 {
-			cleanSummary = cleanSummary[:497] + "..."
-		}
-
 		cleanTitle := scorer.StripHTML(item.Title)
 		link := item.Link
 		if link == "" && len(item.Links) > 0 {
@@ -233,6 +225,20 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 		}
 		if link == "" {
 			continue
+		}
+
+		cleanSummary := scorer.StripHTML(item.Description)
+		if cleanSummary == "" && item.Content != "" {
+			cleanSummary = scorer.StripHTML(item.Content)
+		}
+
+		// Tam içerik üzerinden (özet 500 karaktere budanmadan önce) IoC çıkarımı yap
+		fullText := cleanTitle + " " + item.Description + " " + item.Content
+		extractedIoCs := ioc.Extract(fullText)
+
+		// Önizleme için aşırı uzun özetleri kısalt
+		if len(cleanSummary) > 500 {
+			cleanSummary = cleanSummary[:497] + "..."
 		}
 
 		// Siber tehdit puanını ve atanan etiketleri hesapla
@@ -247,6 +253,7 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 			Tags:        scoringResult.Tags,
 			PublishedAt: pubDate.UTC(),
 			CreatedAt:   time.Now().UTC(),
+			IoCs:        extractedIoCs,
 		}
 
 		articles = append(articles, article)

@@ -17,7 +17,7 @@ import (
 	"ctifeed/internal/api"
 	"ctifeed/internal/collector"
 	"ctifeed/internal/config"
-	"ctifeed/internal/ioc"
+	"ctifeed/internal/model"
 	"ctifeed/internal/notifier"
 	"ctifeed/internal/storage"
 )
@@ -44,6 +44,7 @@ func main() {
 	flag.DurationVar(&cfg.Timeout, "timeout", 10*time.Second, "Timeout per feed fetch request")
 	flag.StringVar(&cfg.DBPath, "db", "ctifeed.db", "Path to SQLite database file")
 	flag.IntVar(&cfg.TopArticles, "top", 10, "Number of top-priority articles to display in CLI report")
+	flag.DurationVar(&cfg.MaxAgeHours, "max-age", 7*24*time.Hour, "Maximum age for articles to process (e.g. 48h, 168h)")
 	flag.IntVar(&cfg.MinScore, "min-score", 0, "Minimum score filter for CLI report display")
 	flag.StringVar(&cfg.TelegramToken, "telegram-token", "", "Telegram Bot API Token")
 	verbose := flag.Bool("verbose", false, "Enable verbose debug logs")
@@ -74,6 +75,11 @@ func main() {
 	if envTimeout := os.Getenv("TIMEOUT"); envTimeout != "" {
 		if t, err := time.ParseDuration(envTimeout); err == nil {
 			cfg.Timeout = t
+		}
+	}
+	if envMaxAge := os.Getenv("MAX_AGE"); envMaxAge != "" {
+		if d, err := time.ParseDuration(envMaxAge); err == nil {
+			cfg.MaxAgeHours = d
 		}
 	}
 
@@ -247,18 +253,19 @@ func runCollectionCycle(ctx context.Context, col *collector.Collector, db *stora
 			slog.Int("duplicates_skipped", skipped),
 		)
 
-		// CLI modunda da yeni eklenen haberlerin IoC'lerini çıkar ve Telegram abonelerine ilet
-		if inserted > 0 {
-			for _, a := range res.Articles[:inserted] {
+		// CLI modunda da yeni eklenen haberleri Telegram abonelerine ilet
+		if inserted > 0 && tgBot != nil {
+			var newArticles []*model.Article
+			for _, a := range res.Articles {
 				if a.ID > 0 {
-					extracted := ioc.Extract(a.Title + " " + a.Summary)
-					if len(extracted) > 0 {
-						_ = db.SaveIoCs(ctx, a.ID, a.Title, a.Source, extracted)
+					newArticles = append(newArticles, a)
+					if len(newArticles) >= inserted {
+						break
 					}
 				}
 			}
-			if tgBot != nil {
-				tgBot.DispatchAlert(ctx, res.Articles[:inserted])
+			if len(newArticles) > 0 {
+				tgBot.DispatchAlert(ctx, newArticles)
 			}
 		}
 	}

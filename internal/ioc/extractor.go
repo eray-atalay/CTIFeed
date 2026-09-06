@@ -92,6 +92,10 @@ var (
 		"crowdstrike.com":           true,
 		"welivesecurity.com":        true,
 		"eset.com":                  true,
+		"redcanary.com":             true,
+		"live.com":                  true,
+		"telegram.org":              true,
+		"discord.com":               true,
 	}
 
 	mu sync.RWMutex

@@ -170,4 +170,22 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 	if stats.CriticalVulnerabilities != 1 {
 		t.Errorf("expected 1 CVE article, got %d", stats.CriticalVulnerabilities)
 	}
+
+	// Analitik verilerini test et
+	analytics, err := db.GetAnalytics(ctx)
+	if err != nil {
+		t.Fatalf("GetAnalytics failed: %v", err)
+	}
+	if analytics == nil {
+		t.Fatal("expected non-nil analytics data")
+	}
+	if len(analytics.SourceShare) == 0 {
+		t.Errorf("expected at least 1 source in source share, got 0")
+	}
+	if len(analytics.TopTags) == 0 {
+		t.Errorf("expected at least 1 top tag, got 0")
+	}
+	if len(analytics.TopVendors) == 0 {
+		t.Errorf("expected at least 1 vendor (vmware), got 0")
+	}
 }

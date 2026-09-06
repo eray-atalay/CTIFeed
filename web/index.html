@@ -10,6 +10,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/global.css">
+  <!-- Chart.js Modern Grafikler Kütüphanesi -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <!-- Arka Plan Işık Efektleri -->
@@ -123,6 +125,58 @@
         </div>
         <div class="metric-value" id="stat-tr">--</div>
         <div class="metric-footnote">Türk kurumları ve USOM uyarıları</div>
+      </div>
+    </section>
+
+    <!-- Analitik ve Trend Grafikleri Bölümü -->
+    <section class="analytics-section" id="analytics-section" aria-label="Tehdit Analitiği ve Grafikler">
+      <div class="analytics-header">
+        <div class="analytics-title-group">
+          <div class="analytics-pulse-dot"></div>
+          <h3 class="analytics-title">Siber Tehdit Analitiği &amp; Trendler</h3>
+          <span class="analytics-badge">Canlı Analiz</span>
+        </div>
+        <button id="btn-toggle-analytics" class="btn-toggle-analytics" title="Analitik Grafikleri Göster/Gizle">
+          <span id="toggle-analytics-text">Grafikleri Gizle</span>
+          <svg class="toggle-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <div class="analytics-charts-grid" id="analytics-charts-container">
+        <!-- 1. Tehdit Türü Dağılımı (Doughnut Chart) -->
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h4>Tehdit Türü Dağılımı</h4>
+            <span class="chart-tag">Kategoriler</span>
+          </div>
+          <div class="chart-body">
+            <canvas id="chart-tags"></canvas>
+          </div>
+        </div>
+
+        <!-- 2. En Çok Hedeflenen Üreticiler (Bar Chart) -->
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <h4>Hedeflenen Teknolojiler</h4>
+            <span class="chart-tag">Üreticiler</span>
+          </div>
+          <div class="chart-body">
+            <canvas id="chart-vendors"></canvas>
+          </div>
+        </div>
+
+        <!-- 3. Aktivite Nabzı & Zaman Çizelgesi (Line/Area Chart) -->
+        <div class="chart-card chart-card-wide">
+          <div class="chart-card-header">
+            <h4>Tehdit Aktivite Nabzı (Son 7 Gün)</h4>
+            <span class="chart-tag">Zaman Çizelgesi</span>
+          </div>
+          <div class="chart-body">
+            <canvas id="chart-timeline"></canvas>
+          </div>
+        </div>
       </div>
     </section>
 

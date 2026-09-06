@@ -42,6 +42,7 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 
 	// REST API Yönlendirmeleri
 	mux.HandleFunc("GET /api/stats", s.handleGetStats)
+	mux.HandleFunc("GET /api/analytics", s.handleGetAnalytics)
 	mux.HandleFunc("GET /api/sources", s.handleGetSources)
 	mux.HandleFunc("GET /api/articles", s.handleGetArticles)
 	mux.HandleFunc("POST /api/scan", s.handlePostScan)
@@ -107,6 +108,18 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(stats)
+}
+
+// handleGetAnalytics, analitik ve grafik verilerini döndürür.
+func (s *Server) handleGetAnalytics(w http.ResponseWriter, r *http.Request) {
+	analytics, err := s.db.GetAnalytics(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(analytics)
 }
 
 // handleGetSources, yapılandırılmış CTI besleme kaynakları listesini döndürür.

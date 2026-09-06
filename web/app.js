@@ -15,6 +15,11 @@
     articles: [],
     sources: [],
     stats: null,
+    analytics: null,
+    chartTagsInstance: null,
+    chartVendorsInstance: null,
+    chartTimelineInstance: null,
+    analyticsCollapsed: localStorage.getItem('ctifeed_analytics_collapsed') === 'true',
     isScanning: false,
     selectedArticle: null,
   };
@@ -60,6 +65,12 @@
     modalTags: document.getElementById('modal-tags'),
     modalSummaryText: document.getElementById('modal-summary-text'),
     modalLinkBtn: document.getElementById('modal-link-btn'),
+    btnToggleAnalytics: document.getElementById('btn-toggle-analytics'),
+    toggleAnalyticsText: document.getElementById('toggle-analytics-text'),
+    analyticsChartsContainer: document.getElementById('analytics-charts-container'),
+    chartTags: document.getElementById('chart-tags'),
+    chartVendors: document.getElementById('chart-vendors'),
+    chartTimeline: document.getElementById('chart-timeline'),
   };
 
   // --- API Istekleri ---
@@ -73,6 +84,18 @@
       renderStats(data);
     } catch (err) {
       console.error('Istatistikler yuklenirken hata:', err);
+    }
+  }
+
+  async function fetchAnalytics() {
+    try {
+      const res = await fetch('/api/analytics');
+      if (!res.ok) throw new Error('Analitik verileri alinamadi');
+      const data = await res.json();
+      state.analytics = data;
+      renderAnalytics(data);
+    } catch (err) {
+      console.error('Analitik yuklenirken hata:', err);
     }
   }
 
@@ -137,6 +160,7 @@
 
       // Verileri guncelle
       await fetchStats();
+      await fetchAnalytics();
       await fetchArticles();
     } catch (err) {
       console.error('Tarama hatasi:', err);
@@ -157,6 +181,197 @@
     animateValue(el.statCritical, stats.high_priority_count || 0);
     animateValue(el.statCve, stats.critical_vulnerabilities || 0);
     animateValue(el.statTr, stats.tr_focus_count || 0);
+  }
+
+  function renderAnalytics(data) {
+    if (!data || typeof Chart === 'undefined') return;
+
+    // Chart.js Global Tema Ayarlari
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+
+    // 1. Tehdit Turu Dagilimi (Doughnut Chart)
+    if (el.chartTags && data.top_tags && data.top_tags.length > 0) {
+      if (state.chartTagsInstance) {
+        state.chartTagsInstance.destroy();
+      }
+
+      const colors = ['#00f2fe', '#ff3366', '#ffb703', '#9d4edd', '#06d6a0', '#3a86ff', '#fb5607', '#a2d2ff'];
+      state.chartTagsInstance = new Chart(el.chartTags, {
+        type: 'doughnut',
+        data: {
+          labels: data.top_tags.map(t => t.label),
+          datasets: [{
+            data: data.top_tags.map(t => t.count),
+            backgroundColor: colors.slice(0, data.top_tags.length),
+            borderColor: '#0b111e',
+            borderWidth: 2,
+            hoverOffset: 4,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '68%',
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: {
+                boxWidth: 10,
+                boxHeight: 10,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                font: { size: 11 },
+                color: '#cbd5e1',
+                padding: 10,
+              },
+            },
+            tooltip: {
+              backgroundColor: '#152033',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderWidth: 1,
+              titleFont: { size: 12, weight: 'bold' },
+              bodyFont: { size: 12 },
+              padding: 10,
+              callbacks: {
+                label: function(ctx) {
+                  const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                  const val = ctx.parsed;
+                  const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+                  return ` ${ctx.label}: ${val} (%${pct})`;
+                }
+              }
+            },
+          },
+        },
+      });
+    }
+
+    // 2. En Cok Hedeflenen Ureticiler (Horizontal Bar Chart)
+    if (el.chartVendors && data.top_vendors && data.top_vendors.length > 0) {
+      if (state.chartVendorsInstance) {
+        state.chartVendorsInstance.destroy();
+      }
+
+      state.chartVendorsInstance = new Chart(el.chartVendors, {
+        type: 'bar',
+        data: {
+          labels: data.top_vendors.map(v => v.vendor),
+          datasets: [{
+            label: 'Tespit Sayisi',
+            data: data.top_vendors.map(v => v.count),
+            backgroundColor: 'rgba(0, 242, 254, 0.55)',
+            borderColor: '#00f2fe',
+            borderWidth: 1.5,
+            borderRadius: 4,
+            hoverBackgroundColor: 'rgba(0, 242, 254, 0.85)',
+          }],
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#152033',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderWidth: 1,
+              padding: 10,
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255, 255, 255, 0.04)' },
+              ticks: { color: '#64748b', font: { size: 10 }, stepSize: 1 },
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: '#cbd5e1', font: { size: 11, weight: '500' } },
+            },
+          },
+        },
+      });
+    }
+
+    // 3. Aktivite Nabzi (Timeline Area Chart)
+    if (el.chartTimeline && data.timeline && data.timeline.length > 0) {
+      if (state.chartTimelineInstance) {
+        state.chartTimelineInstance.destroy();
+      }
+
+      state.chartTimelineInstance = new Chart(el.chartTimeline, {
+        type: 'line',
+        data: {
+          labels: data.timeline.map(t => {
+            const parts = t.date.split('-');
+            return parts.length === 3 ? `${parts[2]}/${parts[1]}` : t.date;
+          }),
+          datasets: [
+            {
+              label: 'Toplam Tehditler',
+              data: data.timeline.map(t => t.total),
+              borderColor: '#00f2fe',
+              backgroundColor: 'rgba(0, 242, 254, 0.12)',
+              fill: true,
+              tension: 0.35,
+              borderWidth: 2,
+              pointBackgroundColor: '#00f2fe',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+            },
+            {
+              label: 'Kritik Alarmlar (50+)',
+              data: data.timeline.map(t => t.critical),
+              borderColor: '#ff3366',
+              backgroundColor: 'rgba(255, 51, 102, 0.12)',
+              fill: true,
+              tension: 0.35,
+              borderWidth: 2,
+              pointBackgroundColor: '#ff3366',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              align: 'end',
+              labels: {
+                boxWidth: 10,
+                boxHeight: 10,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                font: { size: 11 },
+                color: '#cbd5e1',
+                padding: 14,
+              },
+            },
+            tooltip: {
+              backgroundColor: '#152033',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderWidth: 1,
+              padding: 10,
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255, 255, 255, 0.04)' },
+              ticks: { color: '#64748b', font: { size: 11 } },
+            },
+            y: {
+              grid: { color: 'rgba(255, 255, 255, 0.04)' },
+              ticks: { color: '#64748b', font: { size: 11 }, stepSize: 1 },
+              beginAtZero: true,
+            },
+          },
+        },
+      });
+    }
   }
 
   function animateValue(elem, end) {
@@ -557,8 +772,35 @@
       }
     });
 
+    // Analitik Panelini Gizle / Goster
+    if (el.btnToggleAnalytics && el.analyticsChartsContainer) {
+      if (state.analyticsCollapsed) {
+        el.analyticsChartsContainer.classList.add('collapsed');
+        el.btnToggleAnalytics.classList.add('collapsed');
+        if (el.toggleAnalyticsText) el.toggleAnalyticsText.textContent = 'Grafikleri Goster';
+      }
+
+      el.btnToggleAnalytics.addEventListener('click', () => {
+        state.analyticsCollapsed = !state.analyticsCollapsed;
+        localStorage.setItem('ctifeed_analytics_collapsed', state.analyticsCollapsed);
+        if (state.analyticsCollapsed) {
+          el.analyticsChartsContainer.classList.add('collapsed');
+          el.btnToggleAnalytics.classList.add('collapsed');
+          if (el.toggleAnalyticsText) el.toggleAnalyticsText.textContent = 'Grafikleri Goster';
+        } else {
+          el.analyticsChartsContainer.classList.remove('collapsed');
+          el.btnToggleAnalytics.classList.remove('collapsed');
+          if (el.toggleAnalyticsText) el.toggleAnalyticsText.textContent = 'Grafikleri Gizle';
+          if (state.chartTagsInstance) state.chartTagsInstance.resize();
+          if (state.chartVendorsInstance) state.chartVendorsInstance.resize();
+          if (state.chartTimelineInstance) state.chartTimelineInstance.resize();
+        }
+      });
+    }
+
     setInterval(() => {
       fetchStats();
+      fetchAnalytics();
     }, 30000);
   }
 
@@ -566,6 +808,7 @@
     initListeners();
     await Promise.all([
       fetchStats(),
+      fetchAnalytics(),
       fetchSources(),
       fetchArticles(),
     ]);

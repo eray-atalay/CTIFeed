@@ -157,4 +157,23 @@ func TestAPIEndpoints(t *testing.T) {
 			t.Errorf("unexpected article in response: %+v", data.Articles)
 		}
 	}
+
+	// 4. /api/analytics endpoint testi
+	{
+		req := httptest.NewRequest("GET", "/api/analytics", nil)
+		rec := httptest.NewRecorder()
+		srv.server.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for /api/analytics, got %d", rec.Code)
+		}
+
+		var data storage.AnalyticsData
+		if err := json.NewDecoder(rec.Body).Decode(&data); err != nil {
+			t.Fatalf("failed to decode analytics json: %v", err)
+		}
+		if len(data.SourceShare) == 0 {
+			t.Errorf("expected source share to have items")
+		}
+	}
 }

@@ -260,20 +260,18 @@ func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	res := s.collector.CollectAll(r.Context())
 	inserted, skipped, err := s.db.SaveArticles(r.Context(), res.Articles)
-	if inserted > 0 {
-		// Yeni eklenen haberlerin IoC'lerini çıkar ve kaydet
+	if inserted > 0 && s.notifier != nil {
+		var newArticles []*model.Article
 		for _, a := range res.Articles {
 			if a.ID > 0 {
-				extracted := ioc.Extract(a.Title + " " + a.Summary)
-				if len(extracted) > 0 {
-					_ = s.db.SaveIoCs(context.Background(), a.ID, a.Title, a.Source, extracted)
+				newArticles = append(newArticles, a)
+				if len(newArticles) >= inserted {
+					break
 				}
 			}
 		}
-
-		// Yeni eklenen haber varsa abonelere Telegram'dan ilet
-		if s.notifier != nil {
-			s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+		if len(newArticles) > 0 {
+			s.notifier.DispatchAlert(context.Background(), newArticles)
 		}
 	}
 	if err != nil {
@@ -307,17 +305,18 @@ func (s *Server) TriggerScan(ctx context.Context) (int, int, error) {
 	}
 
 	inserted, skipped, err := s.db.SaveArticles(ctx, res.Articles)
-	if inserted > 0 {
+	if inserted > 0 && s.notifier != nil {
+		var newArticles []*model.Article
 		for _, a := range res.Articles {
 			if a.ID > 0 {
-				extracted := ioc.Extract(a.Title + " " + a.Summary)
-				if len(extracted) > 0 {
-					_ = s.db.SaveIoCs(context.Background(), a.ID, a.Title, a.Source, extracted)
+				newArticles = append(newArticles, a)
+				if len(newArticles) >= inserted {
+					break
 				}
 			}
 		}
-		if s.notifier != nil {
-			s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+		if len(newArticles) > 0 {
+			s.notifier.DispatchAlert(context.Background(), newArticles)
 		}
 	}
 	return inserted, skipped, err

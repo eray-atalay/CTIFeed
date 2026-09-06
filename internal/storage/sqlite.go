@@ -149,6 +149,9 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 		if id, err := res.LastInsertId(); err == nil {
 			article.ID = id
 		}
+		if len(article.IoCs) > 0 {
+			_ = d.SaveIoCs(ctx, article.ID, article.Title, article.Source, article.IoCs)
+		}
 		return true, nil
 	}
 
@@ -173,6 +176,15 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 		return 0, 0, fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer stmt.Close()
+
+	iocStmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
+		VALUES (?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to prepare ioc statement: %w", err)
+	}
+	defer iocStmt.Close()
 
 	now := time.Now().UTC()
 	inserted := 0
@@ -211,6 +223,22 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 			}
 		} else {
 			skipped++
+			// Makale zaten mevcutsa ID'sini çek ki tespit edilen IoC'ler bağlanabilsin
+			if a.ID <= 0 {
+				_ = tx.QueryRowContext(ctx, "SELECT id FROM articles WHERE link = ?", a.Link).Scan(&a.ID)
+			}
+		}
+
+		// Makaleye ait tespit edilmiş IoC'leri kaydet
+		if a.ID > 0 && len(a.IoCs) > 0 {
+			nowStr := now.Format(time.RFC3339)
+			for _, item := range a.IoCs {
+				val := strings.TrimSpace(item.Value)
+				if val == "" {
+					continue
+				}
+				_, _ = iocStmt.ExecContext(ctx, a.ID, item.Type, val, a.Title, a.Source, nowStr)
+			}
 		}
 	}
 

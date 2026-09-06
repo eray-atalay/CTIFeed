@@ -227,3 +227,45 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 		t.Fatalf("ExportIoCs csv failed: %v", err)
 	}
 }
+
+func TestSaveArticlesWithIoCs(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	articles := []*model.Article{
+		{
+			Source:      "Cisco Talos",
+			Title:       "Malware Analysis: New Trojan",
+			Link:        "https://blog.talosintelligence.com/sample-ioc-1",
+			Summary:     "Investigation into new trojan variant.",
+			Score:       60,
+			Tags:        []string{"malware", "trojan"},
+			PublishedAt: time.Now().Add(-1 * time.Hour),
+			IoCs: []model.IoC{
+				{Type: model.IoCTypeIP, Value: "185.220.101.5"},
+				{Type: model.IoCTypeSHA256, Value: "a31f222fc283227f5e7988d1ad9c0aecd66d58bb7b4d8518ae23e110308dbf91"},
+			},
+		},
+	}
+
+	inserted, skipped, err := db.SaveArticles(ctx, articles)
+	if err != nil {
+		t.Fatalf("SaveArticles failed: %v", err)
+	}
+	if inserted != 1 || skipped != 0 {
+		t.Fatalf("expected 1 inserted, got %d (skipped %d)", inserted, skipped)
+	}
+	if articles[0].ID == 0 {
+		t.Fatalf("expected article ID to be populated")
+	}
+
+	iocs, count, err := db.GetIoCs(ctx, model.IoCFilter{ArticleID: articles[0].ID})
+	if err != nil {
+		t.Fatalf("GetIoCs failed: %v", err)
+	}
+	if count != 2 || len(iocs) != 2 {
+		t.Fatalf("expected 2 iocs saved automatically, got count=%d, len=%d", count, len(iocs))
+	}
+}
+

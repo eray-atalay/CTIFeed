@@ -46,6 +46,7 @@ func DefaultSources() []model.FeedSource {
 		{Name: "SANS ISC InfoSec", URL: "https://isc.sans.edu/rssfeed_full.xml", Category: "Honeypot & Attack Diaries"},
 		{Name: "CrowdStrike Blog", URL: "https://www.crowdstrike.com/en-us/blog/feed", Category: "Threat Research & Adversaries"},
 		{Name: "ESET WeLiveSecurity", URL: "https://www.welivesecurity.com/en/rss/feed/", Category: "APT & Malware Research"},
+		{Name: "Red Canary Blog", URL: "https://redcanary.com/blog/feed/", Category: "Threat Research & Detection"},
 	}
 }
 
@@ -57,7 +58,7 @@ func NewDefaultConfig() *Config {
 		Workers:       5,
 		Timeout:       10 * time.Second,
 		Interval:      15 * time.Minute,
-		MaxAgeHours:   48 * time.Hour,
+		MaxAgeHours:   7 * 24 * time.Hour,
 		DaemonMode:    false,
 		TopArticles:   10,
 		MinScore:      0,

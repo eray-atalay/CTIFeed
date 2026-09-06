@@ -486,3 +486,167 @@ func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64,
 	}
 	return chatIDs, nil
 }
+
+// TagStat, etiket ve kategori istatistiğini tutar.
+type TagStat struct {
+	Tag   string `json:"tag"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// VendorStat, hedeflenen üretici/teknoloji istatistiğini tutar.
+type VendorStat struct {
+	Vendor string `json:"vendor"`
+	Count  int    `json:"count"`
+}
+
+// TimelineStat, günlük tehdit aktivite istatistiğini tutar.
+type TimelineStat struct {
+	Date     string `json:"date"`
+	Total    int    `json:"total"`
+	Critical int    `json:"critical"`
+}
+
+// AnalyticsData, analitik grafikleri ve trend verilerini barındırır.
+type AnalyticsData struct {
+	TopTags      []TagStat      `json:"top_tags"`
+	TopVendors   []VendorStat   `json:"top_vendors"`
+	Timeline     []TimelineStat `json:"timeline"`
+	SourceShare  []TagStat      `json:"source_share"`
+	AverageScore float64        `json:"average_score"`
+}
+
+// GetAnalytics, grafikler için kategorize edilmiş analitik verilerini toplar.
+func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
+	data := &AnalyticsData{
+		TopTags:     make([]TagStat, 0),
+		TopVendors:  make([]VendorStat, 0),
+		Timeline:    make([]TimelineStat, 0),
+		SourceShare: make([]TagStat, 0),
+	}
+
+	// 1. Ortalama Skor
+	_ = d.conn.QueryRowContext(ctx, "SELECT COALESCE(AVG(score), 0) FROM articles;").Scan(&data.AverageScore)
+
+	// 2. Kaynak Dağılımı (Top 8)
+	srcRows, err := d.conn.QueryContext(ctx, `
+		SELECT source, COUNT(*) as cnt 
+		FROM articles 
+		GROUP BY source 
+		ORDER BY cnt DESC 
+		LIMIT 8;
+	`)
+	if err == nil {
+		defer srcRows.Close()
+		for srcRows.Next() {
+			var s TagStat
+			if err := srcRows.Scan(&s.Tag, &s.Count); err == nil {
+				s.Label = s.Tag
+				data.SourceShare = append(data.SourceShare, s)
+			}
+		}
+	}
+
+	// 3. Son 7 Günün Aktivite Zaman Çizelgesi
+	timeRows, err := d.conn.QueryContext(ctx, `
+		SELECT 
+			strftime('%Y-%m-%d', published_at) AS day,
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END), 0) AS critical
+		FROM articles
+		WHERE published_at >= datetime('now', '-7 days')
+		GROUP BY day
+		ORDER BY day ASC;
+	`)
+	if err == nil {
+		defer timeRows.Close()
+		for timeRows.Next() {
+			var t TimelineStat
+			if err := timeRows.Scan(&t.Date, &t.Total, &t.Critical); err == nil {
+				data.Timeline = append(data.Timeline, t)
+			}
+		}
+	}
+
+	// 4. Tehdit Kategorileri ve Hedeflenen Teknolojiler
+	categoryLabels := map[string]string{
+		"cve":          "CVE Zafiyetleri",
+		"tr-focus":     "TR-Focus (USOM/TR)",
+		"zero-day":     "Zero-Day",
+		"ransomware":   "Ransomware",
+		"rce":          "RCE İstismarı",
+		"data-breach":  "Veri Sızıntısı",
+		"phishing":     "Oltalama (Phishing)",
+		"malware":      "Zararlı Yazılım",
+		"supply-chain": "Tedarik Zinciri",
+	}
+
+	vendorLabels := map[string]string{
+		"microsoft": "Microsoft",
+		"fortinet":  "Fortinet",
+		"cisco":     "Cisco",
+		"vmware":    "VMware",
+		"wordpress": "WordPress",
+		"linux":     "Linux",
+		"apache":    "Apache",
+		"ivanti":    "Ivanti",
+		"apple":     "Apple",
+		"google":    "Google",
+		"palo-alto": "Palo Alto",
+	}
+
+	tagCounts := make(map[string]int)
+	vendorCounts := make(map[string]int)
+
+	tagRows, err := d.conn.QueryContext(ctx, "SELECT tags FROM articles;")
+	if err == nil {
+		defer tagRows.Close()
+		for tagRows.Next() {
+			var rawTags string
+			if err := tagRows.Scan(&rawTags); err != nil {
+				continue
+			}
+			var tags []string
+			if err := json.Unmarshal([]byte(rawTags), &tags); err != nil {
+				continue
+			}
+
+			hasCVE := false
+			for _, t := range tags {
+				tLow := strings.ToLower(t)
+
+				if strings.HasPrefix(tLow, "cve-") {
+					hasCVE = true
+				}
+
+				if _, ok := categoryLabels[tLow]; ok {
+					tagCounts[tLow]++
+				}
+
+				if vName, ok := vendorLabels[tLow]; ok {
+					vendorCounts[vName]++
+				}
+			}
+			if hasCVE {
+				tagCounts["cve"]++
+			}
+		}
+	}
+
+	for k, label := range categoryLabels {
+		cnt := tagCounts[k]
+		if cnt > 0 {
+			data.TopTags = append(data.TopTags, TagStat{Tag: k, Label: label, Count: cnt})
+		}
+	}
+
+	for _, vName := range vendorLabels {
+		cnt := vendorCounts[vName]
+		if cnt > 0 {
+			data.TopVendors = append(data.TopVendors, VendorStat{Vendor: vName, Count: cnt})
+		}
+	}
+
+	return data, nil
+}
+

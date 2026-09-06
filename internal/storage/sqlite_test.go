@@ -188,4 +188,42 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 	if len(analytics.TopVendors) == 0 {
 		t.Errorf("expected at least 1 vendor (vmware), got 0")
 	}
+
+	// IoC depolama ve sorgulama testleri
+	testIoCs := []model.IoC{
+		{Type: model.IoCTypeIP, Value: "194.26.29.112"},
+		{Type: model.IoCTypeDomain, Value: "evil-campaign.top"},
+		{Type: model.IoCTypeSHA256, Value: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	}
+
+	err = db.SaveIoCs(ctx, 1, "Test Campaign", "BleepingComputer", testIoCs)
+	if err != nil {
+		t.Fatalf("SaveIoCs failed: %v", err)
+	}
+
+	// IoC listeleme testi
+	iocs, count, err := db.GetIoCs(ctx, model.IoCFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("GetIoCs failed: %v", err)
+	}
+	if count != 3 || len(iocs) != 3 {
+		t.Fatalf("expected 3 iocs, got count=%d, len=%d", count, len(iocs))
+	}
+
+	// Tip filtresi testi
+	ipIoCs, _, err := db.GetIoCs(ctx, model.IoCFilter{Type: "ip"})
+	if err != nil || len(ipIoCs) != 1 {
+		t.Fatalf("expected 1 ip ioc, got %d (err: %v)", len(ipIoCs), err)
+	}
+
+	// TXT ve CSV Export testi
+	txtBytes, err := db.ExportIoCs(ctx, "", "txt")
+	if err != nil || len(txtBytes) == 0 {
+		t.Fatalf("ExportIoCs txt failed: %v", err)
+	}
+
+	csvBytes, err := db.ExportIoCs(ctx, "", "csv")
+	if err != nil || len(csvBytes) == 0 {
+		t.Fatalf("ExportIoCs csv failed: %v", err)
+	}
 }

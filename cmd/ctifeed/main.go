@@ -17,6 +17,7 @@ import (
 	"ctifeed/internal/api"
 	"ctifeed/internal/collector"
 	"ctifeed/internal/config"
+	"ctifeed/internal/ioc"
 	"ctifeed/internal/notifier"
 	"ctifeed/internal/storage"
 )
@@ -246,9 +247,19 @@ func runCollectionCycle(ctx context.Context, col *collector.Collector, db *stora
 			slog.Int("duplicates_skipped", skipped),
 		)
 
-		// CLI modunda da yeni eklenen haberleri Telegram abonelerine ilet
-		if inserted > 0 && tgBot != nil {
-			tgBot.DispatchAlert(ctx, res.Articles[:inserted])
+		// CLI modunda da yeni eklenen haberlerin IoC'lerini çıkar ve Telegram abonelerine ilet
+		if inserted > 0 {
+			for _, a := range res.Articles[:inserted] {
+				if a.ID > 0 {
+					extracted := ioc.Extract(a.Title + " " + a.Summary)
+					if len(extracted) > 0 {
+						_ = db.SaveIoCs(ctx, a.ID, a.Title, a.Source, extracted)
+					}
+				}
+			}
+			if tgBot != nil {
+				tgBot.DispatchAlert(ctx, res.Articles[:inserted])
+			}
 		}
 	}
 

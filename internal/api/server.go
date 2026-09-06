@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"ctifeed/internal/collector"
 	"ctifeed/internal/config"
+	"ctifeed/internal/ioc"
 	"ctifeed/internal/model"
 	"ctifeed/internal/storage"
 	"ctifeed/web"
@@ -43,6 +45,8 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	// REST API Yönlendirmeleri
 	mux.HandleFunc("GET /api/stats", s.handleGetStats)
 	mux.HandleFunc("GET /api/analytics", s.handleGetAnalytics)
+	mux.HandleFunc("GET /api/iocs", s.handleGetIoCs)
+	mux.HandleFunc("GET /api/iocs/export", s.handleExportIoCs)
 	mux.HandleFunc("GET /api/sources", s.handleGetSources)
 	mux.HandleFunc("GET /api/articles", s.handleGetArticles)
 	mux.HandleFunc("POST /api/scan", s.handlePostScan)
@@ -62,6 +66,15 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+
+	// Mevcut haberler için arka planda tek seferlik IoC indeksi oluştur
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if count, err := db.BackfillIoCs(ctx, ioc.Extract); err == nil && count > 0 {
+			slog.Info("Mevcut haberler icin IoC indeksi olusturuldu", slog.Int("extracted_iocs", count))
+		}
+	}()
 
 	return s
 }
@@ -120,6 +133,65 @@ func (s *Server) handleGetAnalytics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(analytics)
+}
+
+// handleGetIoCs, filtrelenebilir IoC listesini döndürür.
+func (s *Server) handleGetIoCs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 {
+		limit = 50
+	}
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	articleID, _ := strconv.ParseInt(q.Get("article_id"), 10, 64)
+
+	filter := model.IoCFilter{
+		Type:      q.Get("type"),
+		Search:    q.Get("search"),
+		ArticleID: articleID,
+		Limit:     limit,
+		Offset:    offset,
+	}
+
+	iocs, total, err := s.db.GetIoCs(r.Context(), filter)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"total": total,
+		"count": len(iocs),
+		"iocs":  iocs,
+	})
+}
+
+// handleExportIoCs, IoC listesini TXT veya CSV formatında dosya olarak indirir.
+func (s *Server) handleExportIoCs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	iocType := q.Get("type")
+	format := strings.ToLower(q.Get("format"))
+	if format == "" {
+		format = "txt"
+	}
+
+	data, err := s.db.ExportIoCs(r.Context(), iocType, format)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Export error: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"ctifeed-iocs.csv\"")
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"ctifeed-blocklist.txt\"")
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 // handleGetSources, yapılandırılmış CTI besleme kaynakları listesini döndürür.
@@ -188,9 +260,21 @@ func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	res := s.collector.CollectAll(r.Context())
 	inserted, skipped, err := s.db.SaveArticles(r.Context(), res.Articles)
-	// Yeni eklenen haber varsa abonelere Telegram'dan ilet
-	if inserted > 0 && s.notifier != nil {
-		s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+	if inserted > 0 {
+		// Yeni eklenen haberlerin IoC'lerini çıkar ve kaydet
+		for _, a := range res.Articles {
+			if a.ID > 0 {
+				extracted := ioc.Extract(a.Title + " " + a.Summary)
+				if len(extracted) > 0 {
+					_ = s.db.SaveIoCs(context.Background(), a.ID, a.Title, a.Source, extracted)
+				}
+			}
+		}
+
+		// Yeni eklenen haber varsa abonelere Telegram'dan ilet
+		if s.notifier != nil {
+			s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+		}
 	}
 	if err != nil {
 		slog.Error("Database save error during scan", slog.String("error", err.Error()))
@@ -212,19 +296,29 @@ func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// TriggerScan, bir toplama döngüsü çalıştırır (zamanlayıcı veya başlangıç tarafından çağrılır).
+// TriggerScan, harici tetikleyiciler için tüm beslemeleri tarar ve sonuçları kaydeder.
 func (s *Server) TriggerScan(ctx context.Context) (int, int, error) {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()
 
 	res := s.collector.CollectAll(ctx)
-	if ctx.Err() != nil {
-		return 0, 0, ctx.Err()
+	if res.FeedsSuccess == 0 && res.FeedsFailed > 0 {
+		return 0, 0, fmt.Errorf("all %d feeds failed to fetch", res.FeedsFailed)
 	}
 
 	inserted, skipped, err := s.db.SaveArticles(ctx, res.Articles)
-	if inserted > 0 && s.notifier != nil {
-		s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+	if inserted > 0 {
+		for _, a := range res.Articles {
+			if a.ID > 0 {
+				extracted := ioc.Extract(a.Title + " " + a.Summary)
+				if len(extracted) > 0 {
+					_ = s.db.SaveIoCs(context.Background(), a.ID, a.Title, a.Source, extracted)
+				}
+			}
+		}
+		if s.notifier != nil {
+			s.notifier.DispatchAlert(context.Background(), res.Articles[:inserted])
+		}
 	}
 	return inserted, skipped, err
 }

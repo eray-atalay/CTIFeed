@@ -16,6 +16,12 @@ var (
 	md5Regex    = regexp.MustCompile(`\b[a-fA-F0-9]{32}\b`)
 	domainRegex = regexp.MustCompile(`\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|net|org|io|ru|cn|top|xyz|biz|info|cc|to|co|uk|de|me|live|online|site|club|vip|pro|tk|ml|ga|cf|gq|su|onion)\b`)
 
+	// Defanged dot içeren alan adları (örn: evil[.]com, c2(dot)ru, bad{.}xyz, evil[dot]top)
+	defangedDotRegex = regexp.MustCompile(`(?i)\b[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\s*(?:\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\))\s*[a-zA-Z0-9-]+)+\b`)
+
+	// Defanged protokol içeren URL'ler (örn: hxxp://evil.com, hxxps://bad.xyz/path)
+	defangedURLRegex = regexp.MustCompile(`(?i)\b(?:hxxps?|hXXps?):\/\/([^\s/:"'>]+)`)
+
 	// Defang temizleme kuralları
 	defangReplacer = strings.NewReplacer(
 		"hxxps://", "https://",
@@ -164,9 +170,29 @@ func Extract(text string) []model.IoC {
 		}
 	}
 
-	// 4. Alan Adı (Domain) Çıkarımı ve Beyaz Liste Kontrolü
-	domainMatches := domainRegex.FindAllString(normalized, -1)
-	for _, dom := range domainMatches {
+	// 4. Alan Adı (Domain) Çıkarımı: SADECE DEFANG EDİLMİŞ ALAN ADLARI KABUL EDİLİR.
+	// Haberlerde geçen mağdur/kurban şirket isimlerinin (hopcharge.com vb.) veya haber
+	// kaynaklarının yanlışlıkla IoC sanılmasını (False Positive) önlemek için yalnızca orijinal
+	// metinde defang edilmiş ([.], (.), {.}, [dot], hxxp://) olanlar ayıklanıp refang edilir.
+	var candidateDomains []string
+
+	// a. Defang edilmiş nokta içerenler (örn: evil-campaign[.]top, c2-server[.]ru)
+	for _, m := range defangedDotRegex.FindAllString(text, -1) {
+		candidateDomains = append(candidateDomains, Refang(m))
+	}
+
+	// b. Defang edilmiş protokol içerenler (örn: hxxps://bad-site.xyz/payload)
+	for _, sub := range defangedURLRegex.FindAllStringSubmatch(text, -1) {
+		if len(sub) > 1 {
+			candidateDomains = append(candidateDomains, Refang(sub[1]))
+		}
+	}
+
+	for _, cand := range candidateDomains {
+		dom := domainRegex.FindString(cand)
+		if dom == "" {
+			continue
+		}
 		domLow := strings.ToLower(strings.TrimSpace(dom))
 		if isWhitelistedDomain(domLow) {
 			continue

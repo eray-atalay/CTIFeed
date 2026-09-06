@@ -790,8 +790,43 @@
     el.iocTableBody.innerHTML = iocs.map(ioc => {
       const badgeClass = 'ioc-badge-' + ioc.type;
       const threatContext = ioc.threat_context || ioc.context || '';
-      const contextDisplay = threatContext ? escapeHtml(threatContext) : '<span style="color: var(--text-muted);">-</span>';
-      const sourceDisplay = ioc.source ? `<span class="ioc-source-tag">${escapeHtml(ioc.source)}</span>` : '<span style="color: var(--text-muted);">-</span>';
+
+      let contextDisplay = '<span style="color: var(--text-muted);">-</span>';
+      if (threatContext) {
+        if (ioc.url) {
+          contextDisplay = `
+            <a href="${escapeHtml(ioc.url)}" target="_blank" rel="noopener noreferrer" class="ioc-news-link" title="Haberi yeni sekmede aç: ${escapeHtml(threatContext)}">
+              <span>${escapeHtml(threatContext)}</span>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          `;
+        } else {
+          contextDisplay = `<span>${escapeHtml(threatContext)}</span>`;
+        }
+      }
+
+      let sourceDisplay = '<span style="color: var(--text-muted);">-</span>';
+      if (ioc.source) {
+        if (ioc.url) {
+          sourceDisplay = `
+            <a href="${escapeHtml(ioc.url)}" target="_blank" rel="noopener noreferrer" class="ioc-source-tag ioc-source-link" title="Orijinal Haber Kaynağına Git: ${escapeHtml(ioc.source)}">
+              <span>${escapeHtml(ioc.source)}</span>
+              <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          `;
+        } else {
+          sourceDisplay = `<span class="ioc-source-tag">${escapeHtml(ioc.source)}</span>`;
+        }
+      }
+
       const timeDisplay = formatTimeAgo(ioc.first_seen || ioc.created_at) || ((ioc.first_seen || ioc.created_at) ? (ioc.first_seen || ioc.created_at).slice(0, 10) : '-');
 
       return `
@@ -799,7 +834,7 @@
           <td><span class="ioc-type-badge ${badgeClass}">${escapeHtml(ioc.type.toUpperCase())}</span></td>
           <td><span class="ioc-val">${escapeHtml(ioc.value)}</span></td>
           <td>${sourceDisplay}</td>
-          <td><span class="ioc-context" title="${escapeHtml(threatContext)}">${contextDisplay}</span></td>
+          <td><div class="ioc-context">${contextDisplay}</div></td>
           <td style="color: var(--text-muted); font-size: 0.8rem;">${timeDisplay}</td>
           <td style="text-align: center;">
             <button class="btn-copy-ioc" data-val="${escapeHtml(ioc.value)}" title="Panoya Kopyala">

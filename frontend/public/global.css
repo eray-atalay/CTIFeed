@@ -1275,6 +1275,45 @@ button {
   white-space: nowrap;
 }
 
+.ioc-source-link {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.2s;
+}
+
+.ioc-source-link:hover {
+  background: rgba(0, 242, 254, 0.15);
+  border-color: rgba(0, 242, 254, 0.4);
+  color: #00f2fe;
+}
+
+.ioc-news-link {
+  color: var(--text-primary);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.35;
+  transition: color 0.2s;
+}
+
+.ioc-news-link:hover {
+  color: #00f2fe;
+  text-decoration: underline;
+}
+
+.ioc-news-link svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.ioc-news-link:hover svg {
+  opacity: 1;
+}
+
 .ioc-value-code {
   font-family: var(--font-mono);
   font-size: 0.8rem;

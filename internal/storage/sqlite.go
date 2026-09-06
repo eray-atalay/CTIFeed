@@ -698,18 +698,18 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 	var args []any
 
 	if filter.Type != "" {
-		whereClauses = append(whereClauses, "type = ?")
+		whereClauses = append(whereClauses, "i.type = ?")
 		args = append(args, strings.ToLower(strings.TrimSpace(filter.Type)))
 	}
 
 	if filter.Search != "" {
-		whereClauses = append(whereClauses, "(value LIKE ? OR threat_context LIKE ?)")
+		whereClauses = append(whereClauses, "(i.value LIKE ? OR i.threat_context LIKE ?)")
 		searchTerm := "%" + strings.TrimSpace(filter.Search) + "%"
 		args = append(args, searchTerm, searchTerm)
 	}
 
 	if filter.ArticleID > 0 {
-		whereClauses = append(whereClauses, "article_id = ?")
+		whereClauses = append(whereClauses, "i.article_id = ?")
 		args = append(args, filter.ArticleID)
 	}
 
@@ -719,23 +719,32 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 	}
 
 	// Toplam kayıt sayısı
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs %s;", whereSQL)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs i %s;", whereSQL)
 	var totalCount int
 	if err := d.conn.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("count iocs failed: %w", err)
 	}
 
-	// Kayıtları çek
+	// Kayıtları çek (articles tablosu ile birleştirilerek haberin doğrudan URL'si de alınır)
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, article_id, type, value, threat_context, COALESCE(source, ''), first_seen
-		FROM iocs
+		SELECT 
+			i.id, 
+			i.article_id, 
+			i.type, 
+			i.value, 
+			i.threat_context, 
+			COALESCE(i.source, a.source, ''), 
+			COALESCE(a.link, ''), 
+			i.first_seen
+		FROM iocs i
+		LEFT JOIN articles a ON i.article_id = a.id
 		%s
-		ORDER BY first_seen DESC
+		ORDER BY i.first_seen DESC
 		LIMIT ? OFFSET ?;
 	`, whereSQL)
 
@@ -750,7 +759,7 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 	for rows.Next() {
 		var item model.IoC
 		var firstSeenStr string
-		if err := rows.Scan(&item.ID, &item.ArticleID, &item.Type, &item.Value, &item.ThreatContext, &item.Source, &firstSeenStr); err != nil {
+		if err := rows.Scan(&item.ID, &item.ArticleID, &item.Type, &item.Value, &item.ThreatContext, &item.Source, &item.URL, &firstSeenStr); err != nil {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, firstSeenStr); err == nil {
@@ -781,15 +790,17 @@ func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, er
 
 	if strings.ToLower(format) == "csv" {
 		var sb strings.Builder
-		sb.WriteString("Type,Value,ThreatContext,Source,FirstSeen\n")
+		sb.WriteString("Type,Value,ThreatContext,Source,URL,FirstSeen\n")
 		for _, item := range iocs {
 			cleanContext := strings.ReplaceAll(item.ThreatContext, "\"", "\"\"")
 			cleanSource := strings.ReplaceAll(item.Source, "\"", "\"\"")
-			sb.WriteString(fmt.Sprintf("%s,%s,\"%s\",\"%s\",%s\n",
+			cleanURL := strings.ReplaceAll(item.URL, "\"", "\"\"")
+			sb.WriteString(fmt.Sprintf("%s,%s,\"%s\",\"%s\",\"%s\",%s\n",
 				item.Type,
 				item.Value,
 				cleanContext,
 				cleanSource,
+				cleanURL,
 				item.FirstSeen.Format(time.RFC3339),
 			))
 		}
@@ -808,6 +819,9 @@ func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, er
 
 // BackfillIoCs, veritabanında daha önce kaydedilmiş haberlerden geriye dönük IoC çıkarımı yapar.
 func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []model.IoC) (int, error) {
+	// Kural güncellemelerinde eski false-positive alan adlarını temizle
+	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs WHERE type = 'domain';")
+
 	rows, err := d.conn.QueryContext(ctx, "SELECT id, title, summary, source FROM articles;")
 	if err != nil {
 		return 0, err

@@ -19,6 +19,7 @@ type IoC struct {
 	Value         string    `json:"value"`          // örn: "194.26.29.112", "e3b0c44298fc..."
 	ThreatContext string    `json:"threat_context"` // İlişkili haber başlığı
 	Source        string    `json:"source,omitempty"`
+	URL           string    `json:"url,omitempty"`  // Haber kaynak URL bağlantısı
 	FirstSeen     time.Time `json:"first_seen"`
 }
 

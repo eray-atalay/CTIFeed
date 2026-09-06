@@ -14,6 +14,7 @@ func TestExtractIoCs(t *testing.T) {
 		Another domain mentioned: c2-server[.]ru
 		Local tests were on 127.0.0.1 and 192.168.1.100 with DNS 8.8.8.8.
 		Legitimate research reported by bleepingcomputer.com, github.com and cisa.gov.
+		Victim companies mentioned in breach alerts: hopcharge.com, science.co and pattons.com should NOT be extracted.
 		Malware SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 		Dropper MD5: 5d41402abc4b2a76b9719d911017c592
 	`
@@ -49,7 +50,7 @@ func TestExtractIoCs(t *testing.T) {
 		}
 	}
 
-	// 2. Filtrelenmesi gereken meşru/özel adresler ÇIKMAMALI
+	// 2. Filtrelenmesi gereken meşru/özel adresler ve düz (defang edilmemiş) mağdur domainleri ÇIKMAMALI
 	prohibited := []struct {
 		iocType string
 		val     string
@@ -60,6 +61,9 @@ func TestExtractIoCs(t *testing.T) {
 		{model.IoCTypeDomain, "bleepingcomputer.com"},
 		{model.IoCTypeDomain, "github.com"},
 		{model.IoCTypeDomain, "cisa.gov"},
+		{model.IoCTypeDomain, "hopcharge.com"},
+		{model.IoCTypeDomain, "science.co"},
+		{model.IoCTypeDomain, "pattons.com"},
 	}
 
 	for _, prh := range prohibited {

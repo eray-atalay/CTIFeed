@@ -18,6 +18,10 @@
     analyticsCollapsed: localStorage.getItem('ctifeed_analytics_collapsed') === 'true',
     isScanning: false,
     selectedArticle: null,
+    iocType: '',
+    iocSearch: '',
+    iocs: [],
+    iocCounts: { all: 0, ip: 0, domain: 0, sha256: 0, md5: 0 },
   };
 
   // DOM Ogeleri
@@ -67,6 +71,20 @@
     chartTags: document.getElementById('chart-tags'),
     chartVendors: document.getElementById('chart-vendors'),
     chartTimeline: document.getElementById('chart-timeline'),
+    btnIocs: document.getElementById('btn-iocs'),
+    iocsModal: document.getElementById('iocs-modal'),
+    iocsCloseBtn: document.getElementById('iocs-close-btn'),
+    iocTypePills: document.getElementById('ioc-type-pills'),
+    iocSearchInput: document.getElementById('ioc-search-input'),
+    iocTableBody: document.getElementById('ioc-table-body'),
+    iocEmptyState: document.getElementById('ioc-empty-state'),
+    iocCountAll: document.getElementById('ioc-count-all'),
+    iocCountIp: document.getElementById('ioc-count-ip'),
+    iocCountDomain: document.getElementById('ioc-count-domain'),
+    iocCountSha256: document.getElementById('ioc-count-sha256'),
+    iocCountMd5: document.getElementById('ioc-count-md5'),
+    modalIocsWrap: document.getElementById('modal-iocs-wrap'),
+    modalIocsList: document.getElementById('modal-iocs-list'),
   };
 
   // --- API Istekleri ---
@@ -657,6 +675,41 @@
       el.modalTags.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Etiket atanmadi</span>';
     }
 
+    // Makaleye Ait Tehdit Göstergeleri (IoC)
+    if (el.modalIocsWrap && el.modalIocsList) {
+      el.modalIocsList.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Tehdit gostergeleri taranıyor...</span>';
+      el.modalIocsWrap.classList.remove('hidden');
+      fetch(`/api/iocs?article_id=${article.id}`)
+        .then(r => r.json())
+        .then(data => {
+          const iocs = data.iocs || [];
+          if (iocs.length > 0) {
+            el.modalIocsList.innerHTML = iocs.map(ioc => {
+              const badgeClass = 'ioc-badge-' + ioc.type;
+              return `
+                <div class="modal-ioc-item">
+                  <span class="ioc-type-badge ${badgeClass}">${escapeHtml(ioc.type.toUpperCase())}</span>
+                  <span class="ioc-val">${escapeHtml(ioc.value)}</span>
+                  <button class="btn-copy-ioc" data-val="${escapeHtml(ioc.value)}" title="Panoya Kopyala">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span>Kopyala</span>
+                  </button>
+                </div>
+              `;
+            }).join('');
+          } else {
+            el.modalIocsWrap.classList.add('hidden');
+          }
+        })
+        .catch(err => {
+          console.error('Makale IoC yuklenirken hata:', err);
+          el.modalIocsWrap.classList.add('hidden');
+        });
+    }
+
     el.articleModal.classList.remove('hidden');
   }
 
@@ -681,6 +734,95 @@
 
   function closeSourcesModal() {
     el.sourcesModal.classList.add('hidden');
+  }
+
+  // --- IoC Havuzu Yonetimi ---
+
+  async function fetchIoCCounts() {
+    try {
+      const res = await fetch('/api/iocs?limit=1000');
+      if (!res.ok) return;
+      const data = await res.json();
+      const all = data.iocs || [];
+      state.iocCounts.all = all.length;
+      state.iocCounts.ip = all.filter(i => i.type === 'ip').length;
+      state.iocCounts.domain = all.filter(i => i.type === 'domain').length;
+      state.iocCounts.sha256 = all.filter(i => i.type === 'sha256').length;
+      state.iocCounts.md5 = all.filter(i => i.type === 'md5').length;
+
+      if (el.iocCountAll) el.iocCountAll.textContent = state.iocCounts.all;
+      if (el.iocCountIp) el.iocCountIp.textContent = state.iocCounts.ip;
+      if (el.iocCountDomain) el.iocCountDomain.textContent = state.iocCounts.domain;
+      if (el.iocCountSha256) el.iocCountSha256.textContent = state.iocCounts.sha256;
+      if (el.iocCountMd5) el.iocCountMd5.textContent = state.iocCounts.md5;
+    } catch (err) {
+      console.error('IoC sayilari yuklenemedi:', err);
+    }
+  }
+
+  async function fetchIoCs() {
+    try {
+      const params = new URLSearchParams();
+      if (state.iocType) params.set('type', state.iocType);
+      if (state.iocSearch) params.set('search', state.iocSearch);
+      params.set('limit', '250');
+
+      const res = await fetch(`/api/iocs?${params.toString()}`);
+      if (!res.ok) throw new Error('IoC verisi alinamadi');
+      const data = await res.json();
+      state.iocs = data.iocs || [];
+      renderIoCTable(state.iocs);
+    } catch (err) {
+      console.error('IoC listesi yuklenirken hata:', err);
+    }
+  }
+
+  function renderIoCTable(iocs) {
+    if (!el.iocTableBody) return;
+
+    if (!iocs || iocs.length === 0) {
+      el.iocTableBody.innerHTML = '';
+      if (el.iocEmptyState) el.iocEmptyState.classList.remove('hidden');
+      return;
+    }
+
+    if (el.iocEmptyState) el.iocEmptyState.classList.add('hidden');
+    el.iocTableBody.innerHTML = iocs.map(ioc => {
+      const badgeClass = 'ioc-badge-' + ioc.type;
+      const threatContext = ioc.threat_context || ioc.context || '';
+      const contextDisplay = threatContext ? escapeHtml(threatContext) : '<span style="color: var(--text-muted);">-</span>';
+      const sourceDisplay = ioc.source ? `<span class="ioc-source-tag">${escapeHtml(ioc.source)}</span>` : '<span style="color: var(--text-muted);">-</span>';
+      const timeDisplay = formatTimeAgo(ioc.first_seen || ioc.created_at) || ((ioc.first_seen || ioc.created_at) ? (ioc.first_seen || ioc.created_at).slice(0, 10) : '-');
+
+      return `
+        <tr>
+          <td><span class="ioc-type-badge ${badgeClass}">${escapeHtml(ioc.type.toUpperCase())}</span></td>
+          <td><span class="ioc-val">${escapeHtml(ioc.value)}</span></td>
+          <td>${sourceDisplay}</td>
+          <td><span class="ioc-context" title="${escapeHtml(threatContext)}">${contextDisplay}</span></td>
+          <td style="color: var(--text-muted); font-size: 0.8rem;">${timeDisplay}</td>
+          <td style="text-align: center;">
+            <button class="btn-copy-ioc" data-val="${escapeHtml(ioc.value)}" title="Panoya Kopyala">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Kopyala</span>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function openIocsModal() {
+    fetchIoCCounts();
+    fetchIoCs();
+    if (el.iocsModal) el.iocsModal.classList.remove('hidden');
+  }
+
+  function closeIocsModal() {
+    if (el.iocsModal) el.iocsModal.classList.add('hidden');
   }
 
   // --- Yardimci Fonksiyonlar ---
@@ -783,6 +925,59 @@
       if (e.target === el.sourcesModal) closeSourcesModal();
     });
 
+    // IoC Modali Olaylari
+    if (el.btnIocs) el.btnIocs.addEventListener('click', openIocsModal);
+    if (el.iocsCloseBtn) el.iocsCloseBtn.addEventListener('click', closeIocsModal);
+    if (el.iocsModal) {
+      el.iocsModal.addEventListener('click', (e) => {
+        if (e.target === el.iocsModal) closeIocsModal();
+      });
+    }
+
+    if (el.iocTypePills) {
+      el.iocTypePills.querySelectorAll('.pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          el.iocTypePills.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+          state.iocType = pill.dataset.type || '';
+          fetchIoCs();
+        });
+      });
+    }
+
+    let iocSearchTimeout = null;
+    if (el.iocSearchInput) {
+      el.iocSearchInput.addEventListener('input', (e) => {
+        clearTimeout(iocSearchTimeout);
+        iocSearchTimeout = setTimeout(() => {
+          state.iocSearch = e.target.value.trim();
+          fetchIoCs();
+        }, 300);
+      });
+    }
+
+    // Genel Panoya Kopyalama Butonlari Dinleyicisi
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn-copy-ioc');
+      if (btn) {
+        const val = btn.dataset.val;
+        if (val) {
+          navigator.clipboard.writeText(val).then(() => {
+            const span = btn.querySelector('span');
+            const origText = span ? span.textContent : 'Kopyala';
+            if (span) span.textContent = 'Kopyalandı!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+              if (span) span.textContent = origText;
+              btn.classList.remove('copied');
+            }, 1500);
+          }).catch(err => {
+            console.error('Panoya kopyalanamadi:', err);
+          });
+        }
+      }
+    });
+
     el.modalCloseBtn.addEventListener('click', closeArticleModal);
     el.modalCloseFooter.addEventListener('click', closeArticleModal);
     el.articleModal.addEventListener('click', (e) => {
@@ -793,6 +988,7 @@
       if (e.key === 'Escape') {
         closeArticleModal();
         closeSourcesModal();
+        closeIocsModal();
       }
     });
 

@@ -35,6 +35,13 @@
         <h4>Istihbarat Ozeti</h4>
         <p id="modal-summary-text"></p>
       </div>
+
+      <div class="modal-iocs-wrap hidden" id="modal-iocs-wrap">
+        <h4>Tespit Edilen Tehdit Göstergeleri (IoC)</h4>
+        <div class="modal-iocs-list" id="modal-iocs-list">
+          <!-- JS tarafindan doldurulur -->
+        </div>
+      </div>
     </div>
 
     <div class="modal-footer">
@@ -61,6 +68,71 @@
     </div>
     <div class="sources-list" id="sources-list-container">
       <!-- JS tarafindan doldurulur -->
+    </div>
+  </div>
+</div>
+
+<!-- Tehdit Göstergeleri (IoC Havuzu) Modalı -->
+<div class="modal-overlay hidden" id="iocs-modal" role="dialog" aria-modal="true">
+  <div class="modal-card modal-card-wide">
+    <button class="modal-close" id="iocs-close-btn" aria-label="Modali Kapat">&times;</button>
+    <div class="modal-header">
+      <div class="ioc-modal-header-top">
+        <div>
+          <h2>Tehdit Göstergeleri (IoC Havuzu)</h2>
+          <p class="modal-sub">Toplanan istihbarat haberlerinden otomatik ayıklanan ve doğrulanmış IP, Alan Adı ve Hash kayıtları.</p>
+        </div>
+        <div class="ioc-export-actions">
+          <a href="/api/iocs/export?format=txt" download="ctifeed-blocklist.txt" class="btn-secondary btn-export" id="btn-export-txt" title="Firewall / EDR için saf blok listesi indir">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>TXT İndir</span>
+          </a>
+          <a href="/api/iocs/export?format=csv" download="ctifeed-iocs.csv" class="btn-primary btn-export" id="btn-export-csv" title="Excel / SIEM için CSV raporu indir">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>CSV İndir</span>
+          </a>
+        </div>
+      </div>
+      
+      <div class="ioc-filters-bar">
+        <div class="ioc-type-pills" id="ioc-type-pills">
+          <button class="pill active" data-type="">Tümü (<span id="ioc-count-all">0</span>)</button>
+          <button class="pill pill-ip" data-type="ip">IP Adresleri (<span id="ioc-count-ip">0</span>)</button>
+          <button class="pill pill-domain" data-type="domain">Alan Adları (<span id="ioc-count-domain">0</span>)</button>
+          <button class="pill pill-hash" data-type="sha256">SHA256 (<span id="ioc-count-sha256">0</span>)</button>
+          <button class="pill pill-hash" data-type="md5">MD5 (<span id="ioc-count-md5">0</span>)</button>
+        </div>
+        <input type="text" id="ioc-search-input" class="ioc-search-input" placeholder="IoC değeri veya haber içeriğinde ara...">
+      </div>
+    </div>
+
+    <div class="ioc-table-container">
+      <table class="ioc-table" id="ioc-table">
+        <thead>
+          <tr>
+            <th style="width: 90px;">Tür</th>
+            <th>Gösterge (Değer)</th>
+            <th style="width: 140px;">Kaynak</th>
+            <th>İlişkili Tehdit Bağlamı</th>
+            <th style="width: 110px;">İlk Tespit</th>
+            <th style="width: 80px; text-align: center;">Eylem</th>
+          </tr>
+        </thead>
+        <tbody id="ioc-table-body">
+          <!-- JS ile doldurulur -->
+        </tbody>
+      </table>
+      <div id="ioc-empty-state" class="ioc-empty-state hidden">
+        <p>Arama kriterine uygun IoC kaydı bulunamadı.</p>
+      </div>
     </div>
   </div>
 </div>

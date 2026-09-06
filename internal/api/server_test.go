@@ -176,4 +176,23 @@ func TestAPIEndpoints(t *testing.T) {
 			t.Errorf("expected source share to have items")
 		}
 	}
+
+	// 5. /api/iocs ve /api/iocs/export testleri
+	{
+		req := httptest.NewRequest("GET", "/api/iocs", nil)
+		rec := httptest.NewRecorder()
+		srv.server.Handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 for /api/iocs, got %d", rec.Code)
+		}
+
+		reqExport := httptest.NewRequest("GET", "/api/iocs/export?format=txt", nil)
+		recExport := httptest.NewRecorder()
+		srv.server.Handler.ServeHTTP(recExport, reqExport)
+
+		if recExport.Code != http.StatusOK {
+			t.Fatalf("expected 200 for /api/iocs/export, got %d", recExport.Code)
+		}
+	}
 }

@@ -80,6 +80,22 @@ func (d *DB) migrate(ctx context.Context) error {
             PRIMARY KEY (chat_id, tag)
         );`,
 		`CREATE INDEX IF NOT EXISTS idx_subscriptions_tag ON user_subscriptions(tag);`,
+
+		// IoC (Tehdit Göstergeleri) Tablosu ve İndeksleri
+		`CREATE TABLE IF NOT EXISTS iocs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			article_id INTEGER NOT NULL,
+			type TEXT NOT NULL,
+			value TEXT NOT NULL,
+			threat_context TEXT,
+			source TEXT,
+			first_seen DATETIME NOT NULL,
+			FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE,
+			UNIQUE(type, value, article_id)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_iocs_type ON iocs(type);`,
+		`CREATE INDEX IF NOT EXISTS idx_iocs_value ON iocs(value);`,
+		`CREATE INDEX IF NOT EXISTS idx_iocs_first_seen ON iocs(first_seen DESC);`,
 	}
 
 	for _, q := range queries {
@@ -649,4 +665,182 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 
 	return data, nil
 }
+
+// SaveIoCs, bir makaleyle ilişkili tespit edilen IoC'leri veritabanına ekler.
+func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, source string, iocs []model.IoC) error {
+	if len(iocs) == 0 {
+		return nil
+	}
+
+	stmt, err := d.conn.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
+		VALUES (?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare ioc insert failed: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, item := range iocs {
+		val := strings.TrimSpace(item.Value)
+		if val == "" {
+			continue
+		}
+		_, _ = stmt.ExecContext(ctx, articleID, item.Type, val, threatContext, source, now)
+	}
+	return nil
+}
+
+// GetIoCs, filtrelenebilir kriterlere göre IoC listesini ve toplam sayıyı döndürür.
+func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, int, error) {
+	var whereClauses []string
+	var args []any
+
+	if filter.Type != "" {
+		whereClauses = append(whereClauses, "type = ?")
+		args = append(args, strings.ToLower(strings.TrimSpace(filter.Type)))
+	}
+
+	if filter.Search != "" {
+		whereClauses = append(whereClauses, "(value LIKE ? OR threat_context LIKE ?)")
+		searchTerm := "%" + strings.TrimSpace(filter.Search) + "%"
+		args = append(args, searchTerm, searchTerm)
+	}
+
+	if filter.ArticleID > 0 {
+		whereClauses = append(whereClauses, "article_id = ?")
+		args = append(args, filter.ArticleID)
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// Toplam kayıt sayısı
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs %s;", whereSQL)
+	var totalCount int
+	if err := d.conn.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("count iocs failed: %w", err)
+	}
+
+	// Kayıtları çek
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, article_id, type, value, threat_context, COALESCE(source, ''), first_seen
+		FROM iocs
+		%s
+		ORDER BY first_seen DESC
+		LIMIT ? OFFSET ?;
+	`, whereSQL)
+
+	queryArgs := append(args, limit, filter.Offset)
+	rows, err := d.conn.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query iocs failed: %w", err)
+	}
+	defer rows.Close()
+
+	var iocs []model.IoC
+	for rows.Next() {
+		var item model.IoC
+		var firstSeenStr string
+		if err := rows.Scan(&item.ID, &item.ArticleID, &item.Type, &item.Value, &item.ThreatContext, &item.Source, &firstSeenStr); err != nil {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, firstSeenStr); err == nil {
+			item.FirstSeen = t
+		}
+		iocs = append(iocs, item)
+	}
+
+	return iocs, totalCount, nil
+}
+
+// GetIoCsForArticle, belirli bir makaleye ait IoC'leri döner.
+func (d *DB) GetIoCsForArticle(ctx context.Context, articleID int64) ([]model.IoC, error) {
+	iocs, _, err := d.GetIoCs(ctx, model.IoCFilter{ArticleID: articleID, Limit: 100})
+	return iocs, err
+}
+
+// ExportIoCs, IoC'leri TXT (blok listesi) veya CSV formatında bayt dizisi olarak döndürür.
+func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, error) {
+	filter := model.IoCFilter{
+		Type:  iocType,
+		Limit: 2000,
+	}
+	iocs, _, err := d.GetIoCs(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.ToLower(format) == "csv" {
+		var sb strings.Builder
+		sb.WriteString("Type,Value,ThreatContext,Source,FirstSeen\n")
+		for _, item := range iocs {
+			cleanContext := strings.ReplaceAll(item.ThreatContext, "\"", "\"\"")
+			cleanSource := strings.ReplaceAll(item.Source, "\"", "\"\"")
+			sb.WriteString(fmt.Sprintf("%s,%s,\"%s\",\"%s\",%s\n",
+				item.Type,
+				item.Value,
+				cleanContext,
+				cleanSource,
+				item.FirstSeen.Format(time.RFC3339),
+			))
+		}
+		return []byte(sb.String()), nil
+	}
+
+	// Varsayılan: TXT Blok Listesi (Her satırda 1 adet saf değer)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# CTIFeed Otomatik IoC Blok Listesi - %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	sb.WriteString(fmt.Sprintf("# Toplam Kayit: %d\n\n", len(iocs)))
+	for _, item := range iocs {
+		sb.WriteString(item.Value + "\n")
+	}
+	return []byte(sb.String()), nil
+}
+
+// BackfillIoCs, veritabanında daha önce kaydedilmiş haberlerden geriye dönük IoC çıkarımı yapar.
+func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []model.IoC) (int, error) {
+	rows, err := d.conn.QueryContext(ctx, "SELECT id, title, summary, source FROM articles;")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type articleSnippet struct {
+		id      int64
+		title   string
+		summary string
+		source  string
+	}
+
+	var articles []articleSnippet
+	for rows.Next() {
+		var a articleSnippet
+		if err := rows.Scan(&a.id, &a.title, &a.summary, &a.source); err == nil {
+			articles = append(articles, a)
+		}
+	}
+
+	totalExtracted := 0
+	for _, a := range articles {
+		combinedText := a.title + " " + a.summary
+		extracted := extractFn(combinedText)
+		if len(extracted) > 0 {
+			if err := d.SaveIoCs(ctx, a.id, a.title, a.source, extracted); err == nil {
+				totalExtracted += len(extracted)
+			}
+		}
+	}
+
+	return totalExtracted, nil
+}
+
 

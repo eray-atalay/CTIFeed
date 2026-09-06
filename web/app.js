@@ -123,6 +123,8 @@
       if (el.sourcesCountBadge) {
         el.sourcesCountBadge.textContent = state.sources.length;
       }
+      const modalCount = document.getElementById('sources-modal-count');
+      if (modalCount) modalCount.textContent = state.sources.length;
     } catch (err) {
       console.error('Kaynaklar yuklenirken hata:', err);
     }
@@ -140,15 +142,20 @@
       params.set('limit', '60');
 
       const res = await fetch(`/api/articles?${params.toString()}`);
-      if (!res.ok) throw new Error('Tehdit akisi istegi basarisiz');
+      if (!res.ok) throw new Error('Haberler getirilemedi');
       const data = await res.json();
-
       state.articles = data.articles || [];
-      renderArticles(state.articles, data.total || 0);
-      updateFilterSummary();
+      renderArticles(state.articles);
+      el.feedCount.textContent = `${data.total || 0} oge`;
+      el.lastUpdatedText.textContent = `Son Guncelleme: ${new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
     } catch (err) {
       console.error('Haberler yuklenirken hata:', err);
-      el.articlesGrid.innerHTML = `<div class="empty-state"><h3>Tehdit beslemeleri yuklenemedi</h3><p>${escapeHtml(err.message)}</p></div>`;
+      el.articlesGrid.innerHTML = `
+        <div class="empty-state">
+          <h3>Veriler yuklenirken bir sorun olustu</h3>
+          <p>Lutfen internet baglantinizi ve sunucu durumunu kontrol ediniz.</p>
+        </div>
+      `;
     } finally {
       setLoading(false);
     }
@@ -157,10 +164,11 @@
   async function triggerScan() {
     if (state.isScanning) return;
     state.isScanning = true;
+    const count = state.sources.length || 22;
     el.btnScanNow.classList.add('scanning');
-    el.scanBtnText.textContent = '18 Kaynak Taraniyor...';
+    el.scanBtnText.textContent = `${count} Kaynak Taraniyor...`;
     el.scanBanner.classList.remove('hidden');
-    el.scanBannerText.textContent = '18 CTI kaynagina baglaniliyor, beslemeler ayristiriliyor ve puanlaniyor...';
+    el.scanBannerText.textContent = `${count} CTI kaynagina baglaniliyor, beslemeler ayristiriliyor ve puanlaniyor...`;
 
     try {
       const res = await fetch('/api/scan', { method: 'POST' });

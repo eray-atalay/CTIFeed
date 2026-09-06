@@ -88,6 +88,10 @@ var (
 		"nist.gov":                  true,
 		"mitre.org":                 true,
 		"virustotal.com":            true,
+		"any.run":                   true,
+		"crowdstrike.com":           true,
+		"welivesecurity.com":        true,
+		"eset.com":                  true,
 	}
 
 	mu sync.RWMutex

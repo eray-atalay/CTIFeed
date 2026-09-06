@@ -127,8 +127,8 @@ func TestAPIEndpoints(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&data); err != nil {
 			t.Fatalf("failed to decode sources json: %v", err)
 		}
-		if data.Count != 18 {
-			t.Errorf("expected 18 sources, got %d", data.Count)
+		if data.Count != len(srv.cfg.Sources) {
+			t.Errorf("expected %d sources, got %d", len(srv.cfg.Sources), data.Count)
 		}
 	}
 

@@ -1,7 +1,3 @@
-/**
- * CTIFeed Tehdit Radari - Istemci Mantigi (Sifir Emoji - %100 Turkce)
- */
-
 (function () {
   'use strict';
 
@@ -152,7 +148,7 @@
       const res = await fetch('/api/scan', { method: 'POST' });
       if (!res.ok) throw new Error('Tarama dongusu basarisiz');
       const data = await res.json();
-      
+
       el.scanBannerText.textContent = `Tarama tamamlandi: ${data.new_inserted} yeni tehdit maddesi eklendi, ${data.duplicates_skipped} mukerrer kayit atlandi.`;
       setTimeout(() => {
         el.scanBanner.classList.add('hidden');
@@ -183,7 +179,35 @@
     animateValue(el.statTr, stats.tr_focus_count || 0);
   }
 
+  function ensureChart(callback) {
+    if (typeof Chart !== 'undefined') {
+      callback();
+      return;
+    }
+    let script = document.querySelector('script[src*="chart"]');
+    if (!script) {
+      script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', () => callback());
+    const interval = setInterval(() => {
+      if (typeof Chart !== 'undefined') {
+        clearInterval(interval);
+        callback();
+      }
+    }, 100);
+    setTimeout(() => clearInterval(interval), 6000);
+  }
+
   function renderAnalytics(data) {
+    if (!data) return;
+    ensureChart(() => {
+      drawAnalyticsCharts(data);
+    });
+  }
+
+  function drawAnalyticsCharts(data) {
     if (!data || typeof Chart === 'undefined') return;
 
     // Chart.js Global Tema Ayarlari
@@ -234,7 +258,7 @@
               bodyFont: { size: 12 },
               padding: 10,
               callbacks: {
-                label: function(ctx) {
+                label: function (ctx) {
                   const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
                   const val = ctx.parsed;
                   const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;

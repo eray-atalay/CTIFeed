@@ -225,6 +225,7 @@ func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 		Limit:    limit,
 		Offset:   offset,
 		SortBy:   query.Get("sort"),
+		TimeRange: query.Get("time_range"),
 	}
 
 	articles, totalCount, err := s.db.QueryArticles(r.Context(), filter)

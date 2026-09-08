@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,13 +20,13 @@ import (
 	"ctifeed/internal/scorer"
 )
 
-// Collector, RSS/Atom beslemelerinin eşzamanlı çekilmesini ve ayrıştırılmasını yönetir.
+// Collector, RSS/Atom ve Telegram beslemelerinin eşzamanlı çekilmesini yönetir.
 type Collector struct {
 	cfg        *config.Config
 	httpClient *http.Client
 }
 
-// Result, bir besleme toplama döngüsünün sonuçlarını barındırır.
+// Result, bir besleme toplama döngüsünün sonucunu barındırır.
 type Result struct {
 	Articles     []*model.Article
 	FeedsSuccess int
@@ -33,12 +36,10 @@ type Result struct {
 	Duration     time.Duration
 }
 
-// feedJob, işçi havuzu (worker pool) için besleme kaynağını sarmalar.
 type feedJob struct {
 	source model.FeedSource
 }
 
-// feedResult, tek bir besleme kaynağından toplanan haberleri taşır.
 type feedResult struct {
 	source   model.FeedSource
 	articles []*model.Article
@@ -46,7 +47,6 @@ type feedResult struct {
 	err      error
 }
 
-// headerTransport, standart tarayıcı feed okuyucularını taklit etmek için HTTP başlıkları ekler.
 type headerTransport struct {
 	base      http.RoundTripper
 	userAgent string
@@ -59,7 +59,7 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
-// New, özel HTTP istemcisine sahip yeni bir Collector örneği oluşturur.
+// New, özel HTTP istemcisine sahip yeni bir Collector oluşturur.
 func New(cfg *config.Config) *Collector {
 	baseTransport := &http.Transport{
 		MaxIdleConns:        100,
@@ -84,11 +84,10 @@ func New(cfg *config.Config) *Collector {
 	}
 }
 
-// CollectAll, tanımlı tüm beslemeleri paralel olarak çekmek ve işlemek için işçi havuzunu (worker pool) koordine eder.
+// CollectAll, tüm kaynakları paralel olarak çeker.
 func (c *Collector) CollectAll(ctx context.Context) Result {
 	startTime := time.Now()
 	sources := c.cfg.Sources
-
 	workers := c.cfg.Workers
 	if workers <= 0 {
 		workers = 5
@@ -101,8 +100,6 @@ func (c *Collector) CollectAll(ctx context.Context) Result {
 	results := make(chan feedResult, len(sources))
 
 	var wg sync.WaitGroup
-
-	// İşçi havuzunu başlat
 	for w := 1; w <= workers; w++ {
 		wg.Add(1)
 		go func(workerID int) {
@@ -111,13 +108,11 @@ func (c *Collector) CollectAll(ctx context.Context) Result {
 		}(w)
 	}
 
-	// Tüm besleme kaynaklarını kuyruğa ekle
 	for _, src := range sources {
 		jobs <- feedJob{source: src}
 	}
 	close(jobs)
 
-	// İşçileri ayrı bir goroutine içinde bekle ve sonuç kanalını kapat
 	go func() {
 		wg.Wait()
 		close(results)
@@ -160,7 +155,6 @@ func (c *Collector) CollectAll(ctx context.Context) Result {
 	}
 }
 
-// worker, kanal boşalana veya context iptal edilene kadar besleme işlerini yürütür.
 func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, results chan<- feedResult) {
 	for job := range jobs {
 		select {
@@ -168,18 +162,130 @@ func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, res
 			results <- feedResult{source: job.source, err: ctx.Err()}
 			return
 		default:
-			articles, oldCnt, err := c.fetchFeed(ctx, job.source)
-			results <- feedResult{
-				source:   job.source,
-				articles: articles,
-				oldCnt:   oldCnt,
-				err:      err,
+			// Telegram kanali mi standart RSS mi kontrol et
+			if strings.HasPrefix(job.source.URL, "telegram://") || strings.Contains(job.source.URL, "t.me/s/") {
+				articles, oldCnt, err := c.fetchTelegramFeed(ctx, job.source)
+				results <- feedResult{
+					source:   job.source,
+					articles: articles,
+					oldCnt:   oldCnt,
+					err:      err,
+				}
+			} else {
+				articles, oldCnt, err := c.fetchFeed(ctx, job.source)
+				results <- feedResult{
+					source:   job.source,
+					articles: articles,
+					oldCnt:   oldCnt,
+					err:      err,
+				}
 			}
 		}
 	}
 }
 
-// fetchFeed, zaman aşımı korumasıyla tek bir beslemeyi çeker ve maddelerini işler.
+// fetchTelegramFeed, t.me/s/<channel> sayfasindan mesajlari ceker ve Article nesnelerine donusturur.
+func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, c.cfg.Timeout)
+	defer cancel()
+
+	channelName := strings.TrimPrefix(src.URL, "telegram://")
+	channelName = strings.TrimPrefix(channelName, "https://t.me/s/")
+	channelName = strings.TrimPrefix(channelName, "http://t.me/s/")
+	targetURL := fmt.Sprintf("https://t.me/s/%s", channelName)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, 0, fmt.Errorf("telegram status code: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	htmlContent := string(body)
+
+	// Regex ile mesaj, tarih ve tekil post linki tespiti
+	msgRegex := regexp.MustCompile(`(?s)<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>`)
+	linkRegex := regexp.MustCompile(`data-post="([^"]+)"`)
+	timeRegex := regexp.MustCompile(`<time datetime="([^"]+)"`)
+
+	matches := msgRegex.FindAllStringSubmatch(htmlContent, -1)
+	postLinks := linkRegex.FindAllStringSubmatch(htmlContent, -1)
+	times := timeRegex.FindAllStringSubmatch(htmlContent, -1)
+
+	cutoff := time.Now().Add(-c.cfg.MaxAgeHours)
+	var articles []*model.Article
+	oldCnt := 0
+
+	for i, m := range matches {
+		rawText := m[1]
+		cleanSummary := scorer.StripHTML(rawText)
+		if cleanSummary == "" {
+			continue
+		}
+
+		// Post Linki
+		link := fmt.Sprintf("https://t.me/%s/%d", channelName, i)
+		if i < len(postLinks) {
+			link = "https://t.me/" + postLinks[i][1]
+		}
+
+		// Yayin Tarihi
+		pubDate := time.Now().UTC()
+		if i < len(times) {
+			if parsedT, err := time.Parse(time.RFC3339, times[i][1]); err == nil {
+				pubDate = parsedT
+			}
+		}
+
+		if !pubDate.IsZero() && pubDate.Before(cutoff) {
+			oldCnt++
+			continue
+		}
+
+		// Ilk satirdan baslik cikarma
+		lines := strings.Split(cleanSummary, "\n")
+		cleanTitle := strings.TrimSpace(lines[0])
+		if len(cleanTitle) > 120 {
+			cleanTitle = cleanTitle[:117] + "..."
+		}
+		if cleanTitle == "" {
+			cleanTitle = fmt.Sprintf("[%s] Yeni Tehdit Bildirimi", src.Name)
+		}
+
+		// IoC ve Puanlama
+		extractedIoCs := ioc.Extract(cleanSummary)
+		scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
+
+		articles = append(articles, &model.Article{
+			Source:      src.Name,
+			Title:       cleanTitle,
+			Link:        link, // Link UNIQUE oldugu icin SQLite mukerrerleri otomatik eler!
+			Summary:     cleanSummary,
+			Score:       scoringResult.Score,
+			Tags:        scoringResult.Tags,
+			PublishedAt: pubDate.UTC(),
+			CreatedAt:   time.Now().UTC(),
+			IoCs:        extractedIoCs,
+		})
+	}
+
+	return articles, oldCnt, nil
+}
+
+// fetchFeed, standart RSS/Atom beslemelerini ceker.
 func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, c.cfg.Timeout)
 	defer cancel()
@@ -207,8 +313,6 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 		}
 
 		pubDate := parseItemDate(item)
-
-		// Filtre: Yalnızca son 48 saat içinde yayımlanmış haberler işleme alınır
 		if !pubDate.IsZero() && pubDate.Before(cutoff) {
 			oldCnt++
 			continue
@@ -232,16 +336,13 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 			cleanSummary = scorer.StripHTML(item.Content)
 		}
 
-		// Tam içerik üzerinden (özet 500 karaktere budanmadan önce) IoC çıkarımı yap
 		fullText := cleanTitle + " " + item.Description + " " + item.Content
 		extractedIoCs := ioc.Extract(fullText)
 
-		// Önizleme için aşırı uzun özetleri kısalt
 		if len(cleanSummary) > 500 {
 			cleanSummary = cleanSummary[:497] + "..."
 		}
 
-		// Siber tehdit puanını ve atanan etiketleri hesapla
 		scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
 
 		article := &model.Article{
@@ -262,7 +363,6 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 	return articles, oldCnt, nil
 }
 
-// parseItemDate, gofeed.Item içerisindeki PublishedParsed ve UpdatedParsed tarihlerini inceler.
 func parseItemDate(item *gofeed.Item) time.Time {
 	if item.PublishedParsed != nil && !item.PublishedParsed.IsZero() {
 		return *item.PublishedParsed

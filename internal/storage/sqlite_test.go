@@ -170,4 +170,102 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 	if stats.CriticalVulnerabilities != 1 {
 		t.Errorf("expected 1 CVE article, got %d", stats.CriticalVulnerabilities)
 	}
+
+	// Analitik verilerini test et
+	analytics, err := db.GetAnalytics(ctx)
+	if err != nil {
+		t.Fatalf("GetAnalytics failed: %v", err)
+	}
+	if analytics == nil {
+		t.Fatal("expected non-nil analytics data")
+	}
+	if len(analytics.SourceShare) == 0 {
+		t.Errorf("expected at least 1 source in source share, got 0")
+	}
+	if len(analytics.TopTags) == 0 {
+		t.Errorf("expected at least 1 top tag, got 0")
+	}
+	if len(analytics.TopVendors) == 0 {
+		t.Errorf("expected at least 1 vendor (vmware), got 0")
+	}
+
+	// IoC depolama ve sorgulama testleri
+	testIoCs := []model.IoC{
+		{Type: model.IoCTypeIP, Value: "194.26.29.112"},
+		{Type: model.IoCTypeDomain, Value: "evil-campaign.top"},
+		{Type: model.IoCTypeSHA256, Value: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	}
+
+	err = db.SaveIoCs(ctx, 1, "Test Campaign", "BleepingComputer", testIoCs)
+	if err != nil {
+		t.Fatalf("SaveIoCs failed: %v", err)
+	}
+
+	// IoC listeleme testi
+	iocs, count, err := db.GetIoCs(ctx, model.IoCFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("GetIoCs failed: %v", err)
+	}
+	if count != 3 || len(iocs) != 3 {
+		t.Fatalf("expected 3 iocs, got count=%d, len=%d", count, len(iocs))
+	}
+
+	// Tip filtresi testi
+	ipIoCs, _, err := db.GetIoCs(ctx, model.IoCFilter{Type: "ip"})
+	if err != nil || len(ipIoCs) != 1 {
+		t.Fatalf("expected 1 ip ioc, got %d (err: %v)", len(ipIoCs), err)
+	}
+
+	// TXT ve CSV Export testi
+	txtBytes, err := db.ExportIoCs(ctx, "", "txt")
+	if err != nil || len(txtBytes) == 0 {
+		t.Fatalf("ExportIoCs txt failed: %v", err)
+	}
+
+	csvBytes, err := db.ExportIoCs(ctx, "", "csv")
+	if err != nil || len(csvBytes) == 0 {
+		t.Fatalf("ExportIoCs csv failed: %v", err)
+	}
 }
+
+func TestSaveArticlesWithIoCs(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	articles := []*model.Article{
+		{
+			Source:      "Cisco Talos",
+			Title:       "Malware Analysis: New Trojan",
+			Link:        "https://blog.talosintelligence.com/sample-ioc-1",
+			Summary:     "Investigation into new trojan variant.",
+			Score:       60,
+			Tags:        []string{"malware", "trojan"},
+			PublishedAt: time.Now().Add(-1 * time.Hour),
+			IoCs: []model.IoC{
+				{Type: model.IoCTypeIP, Value: "185.220.101.5"},
+				{Type: model.IoCTypeSHA256, Value: "a31f222fc283227f5e7988d1ad9c0aecd66d58bb7b4d8518ae23e110308dbf91"},
+			},
+		},
+	}
+
+	inserted, skipped, err := db.SaveArticles(ctx, articles)
+	if err != nil {
+		t.Fatalf("SaveArticles failed: %v", err)
+	}
+	if inserted != 1 || skipped != 0 {
+		t.Fatalf("expected 1 inserted, got %d (skipped %d)", inserted, skipped)
+	}
+	if articles[0].ID == 0 {
+		t.Fatalf("expected article ID to be populated")
+	}
+
+	iocs, count, err := db.GetIoCs(ctx, model.IoCFilter{ArticleID: articles[0].ID})
+	if err != nil {
+		t.Fatalf("GetIoCs failed: %v", err)
+	}
+	if count != 2 || len(iocs) != 2 {
+		t.Fatalf("expected 2 iocs saved automatically, got count=%d, len=%d", count, len(iocs))
+	}
+}
+

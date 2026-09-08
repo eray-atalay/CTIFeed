@@ -939,7 +939,6 @@ button {
     grid-template-columns: 1fr;
   }
 }
-
 /*Telegram bot*/
 
 .btn-telegram {
@@ -952,4 +951,437 @@ button {
   background: #1c2e47;
   border-color: #3b82f6;
   color: #93c5fd;
+}
+
+/* ==========================================================================
+   Analitik ve Trend Grafikleri Stilleri
+   ========================================================================== */
+
+.analytics-section {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-card-border);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(12px);
+  position: relative;
+  overflow: hidden;
+}
+
+.analytics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.analytics-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.analytics-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00f2fe;
+  box-shadow: 0 0 10px #00f2fe, 0 0 4px #00f2fe;
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.analytics-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.analytics-badge {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: #00f2fe;
+  background: rgba(0, 242, 254, 0.1);
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 242, 254, 0.25);
+  font-weight: 500;
+}
+
+.btn-toggle-analytics {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-toggle-analytics:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.btn-toggle-analytics .toggle-icon {
+  transition: transform 0.3s ease;
+}
+
+.btn-toggle-analytics.collapsed .toggle-icon {
+  transform: rotate(180deg);
+}
+
+.analytics-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  transition: opacity 0.3s ease, max-height 0.4s ease;
+}
+
+.analytics-charts-grid.collapsed {
+  display: none;
+}
+
+.chart-card {
+  background: #0b111e;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.chart-card-wide {
+  grid-column: span 2;
+}
+
+.chart-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.chart-card-header h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.chart-tag {
+  font-size: 0.675rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.chart-body {
+  position: relative;
+  height: 230px;
+  width: 100%;
+}
+
+@media (max-width: 960px) {
+  .analytics-charts-grid {
+    grid-template-columns: 1fr;
+  }
+  .chart-card-wide {
+    grid-column: span 1;
+  }
+}
+
+/* ==========================================================================
+   IoC (Tehdit Göstergeleri) Havuzu Stilleri
+   ========================================================================== */
+
+.ioc-modal-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ioc-export-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn-export {
+  font-size: 0.8rem;
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-export svg {
+  flex-shrink: 0;
+}
+
+.ioc-filters-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ioc-type-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pill-ip.active {
+  background: rgba(0, 242, 254, 0.15) !important;
+  border-color: #00f2fe !important;
+  color: #00f2fe !important;
+}
+
+.pill-domain.active {
+  background: rgba(157, 78, 221, 0.15) !important;
+  border-color: #9d4edd !important;
+  color: #c77dff !important;
+}
+
+.pill-hash.active {
+  background: rgba(255, 183, 3, 0.15) !important;
+  border-color: #ffb703 !important;
+  color: #ffb703 !important;
+}
+
+.ioc-search-input {
+  background: #0c1220;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  color: var(--text-primary);
+  font-size: 0.825rem;
+  width: 280px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.ioc-search-input:focus {
+  border-color: #00f2fe;
+}
+
+.ioc-table-container {
+  max-height: 480px;
+  overflow-y: auto;
+  margin-top: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  background: #090e18;
+}
+
+.ioc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.825rem;
+  text-align: left;
+}
+
+.ioc-table th {
+  background: #0d1424;
+  position: sticky;
+  top: 0;
+  padding: 10px 14px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 2;
+  letter-spacing: 0.02em;
+}
+
+.ioc-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.ioc-table tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ioc-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.675rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.ioc-badge-ip {
+  background: rgba(0, 242, 254, 0.12);
+  color: #00f2fe;
+  border: 1px solid rgba(0, 242, 254, 0.3);
+}
+
+.ioc-badge-domain {
+  background: rgba(157, 78, 221, 0.12);
+  color: #c77dff;
+  border: 1px solid rgba(157, 78, 221, 0.3);
+}
+
+.ioc-badge-sha256,
+.ioc-badge-md5 {
+  background: rgba(255, 183, 3, 0.12);
+  color: #ffb703;
+  border: 1px solid rgba(255, 183, 3, 0.3);
+}
+
+.ioc-source-tag {
+  display: inline-block;
+  font-size: 0.725rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ioc-source-link {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.2s;
+}
+
+.ioc-source-link:hover {
+  background: rgba(0, 242, 254, 0.15);
+  border-color: rgba(0, 242, 254, 0.4);
+  color: #00f2fe;
+}
+
+.ioc-news-link {
+  color: var(--text-primary);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.35;
+  transition: color 0.2s;
+}
+
+.ioc-news-link:hover {
+  color: #00f2fe;
+  text-decoration: underline;
+}
+
+.ioc-news-link svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.ioc-news-link:hover svg {
+  opacity: 1;
+}
+
+.ioc-value-code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: #e2e8f0;
+  word-break: break-all;
+}
+
+.btn-copy-ioc {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.725rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-copy-ioc:hover {
+  background: rgba(0, 242, 254, 0.15);
+  border-color: #00f2fe;
+  color: #00f2fe;
+}
+
+.ioc-empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* Haber Detay Modalı IoC Listesi */
+.modal-iocs-wrap {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.modal-iocs-wrap h4 {
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modal-iocs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-ioc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0c1220;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 10px;
+}
+
+.modal-ioc-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
 }

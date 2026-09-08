@@ -20,6 +20,7 @@ type Article struct {
 	Tags        []string  `json:"tags"`
 	PublishedAt time.Time `json:"published_at"`
 	CreatedAt   time.Time `json:"created_at"`
+	IoCs        []IoC     `json:"iocs,omitempty"`
 }
 
 // ScoringResult, hesaplanan puanı, eşleşen etiketleri ve puanlama detay dağılımını içerir.

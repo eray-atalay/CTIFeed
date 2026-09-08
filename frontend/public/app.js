@@ -1,7 +1,3 @@
-/**
- * CTIFeed Tehdit Radari - Istemci Mantigi (Sifir Emoji - %100 Turkce)
- */
-
 (function () {
   'use strict';
 
@@ -15,8 +11,17 @@
     articles: [],
     sources: [],
     stats: null,
+    analytics: null,
+    chartTagsInstance: null,
+    chartVendorsInstance: null,
+    chartTimelineInstance: null,
+    analyticsCollapsed: localStorage.getItem('ctifeed_analytics_collapsed') === 'true',
     isScanning: false,
     selectedArticle: null,
+    iocType: '',
+    iocSearch: '',
+    iocs: [],
+    iocCounts: { all: 0, ip: 0, domain: 0, sha256: 0, md5: 0 },
   };
 
   // DOM Ogeleri
@@ -60,6 +65,26 @@
     modalTags: document.getElementById('modal-tags'),
     modalSummaryText: document.getElementById('modal-summary-text'),
     modalLinkBtn: document.getElementById('modal-link-btn'),
+    btnToggleAnalytics: document.getElementById('btn-toggle-analytics'),
+    toggleAnalyticsText: document.getElementById('toggle-analytics-text'),
+    analyticsChartsContainer: document.getElementById('analytics-charts-container'),
+    chartTags: document.getElementById('chart-tags'),
+    chartVendors: document.getElementById('chart-vendors'),
+    chartTimeline: document.getElementById('chart-timeline'),
+    btnIocs: document.getElementById('btn-iocs'),
+    iocsModal: document.getElementById('iocs-modal'),
+    iocsCloseBtn: document.getElementById('iocs-close-btn'),
+    iocTypePills: document.getElementById('ioc-type-pills'),
+    iocSearchInput: document.getElementById('ioc-search-input'),
+    iocTableBody: document.getElementById('ioc-table-body'),
+    iocEmptyState: document.getElementById('ioc-empty-state'),
+    iocCountAll: document.getElementById('ioc-count-all'),
+    iocCountIp: document.getElementById('ioc-count-ip'),
+    iocCountDomain: document.getElementById('ioc-count-domain'),
+    iocCountSha256: document.getElementById('ioc-count-sha256'),
+    iocCountMd5: document.getElementById('ioc-count-md5'),
+    modalIocsWrap: document.getElementById('modal-iocs-wrap'),
+    modalIocsList: document.getElementById('modal-iocs-list'),
   };
 
   // --- API Istekleri ---
@@ -76,6 +101,18 @@
     }
   }
 
+  async function fetchAnalytics() {
+    try {
+      const res = await fetch('/api/analytics');
+      if (!res.ok) throw new Error('Analitik verileri alinamadi');
+      const data = await res.json();
+      state.analytics = data;
+      renderAnalytics(data);
+    } catch (err) {
+      console.error('Analitik yuklenirken hata:', err);
+    }
+  }
+
   async function fetchSources() {
     try {
       const res = await fetch('/api/sources');
@@ -86,6 +123,8 @@
       if (el.sourcesCountBadge) {
         el.sourcesCountBadge.textContent = state.sources.length;
       }
+      const modalCount = document.getElementById('sources-modal-count');
+      if (modalCount) modalCount.textContent = state.sources.length;
     } catch (err) {
       console.error('Kaynaklar yuklenirken hata:', err);
     }
@@ -103,15 +142,20 @@
       params.set('limit', '60');
 
       const res = await fetch(`/api/articles?${params.toString()}`);
-      if (!res.ok) throw new Error('Tehdit akisi istegi basarisiz');
+      if (!res.ok) throw new Error('Haberler getirilemedi');
       const data = await res.json();
-
       state.articles = data.articles || [];
-      renderArticles(state.articles, data.total || 0);
-      updateFilterSummary();
+      renderArticles(state.articles);
+      el.feedCount.textContent = `${data.total || 0} oge`;
+      el.lastUpdatedText.textContent = `Son Guncelleme: ${new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
     } catch (err) {
       console.error('Haberler yuklenirken hata:', err);
-      el.articlesGrid.innerHTML = `<div class="empty-state"><h3>Tehdit beslemeleri yuklenemedi</h3><p>${escapeHtml(err.message)}</p></div>`;
+      el.articlesGrid.innerHTML = `
+        <div class="empty-state">
+          <h3>Veriler yuklenirken bir sorun olustu</h3>
+          <p>Lutfen internet baglantinizi ve sunucu durumunu kontrol ediniz.</p>
+        </div>
+      `;
     } finally {
       setLoading(false);
     }
@@ -120,16 +164,17 @@
   async function triggerScan() {
     if (state.isScanning) return;
     state.isScanning = true;
+    const count = state.sources.length || 22;
     el.btnScanNow.classList.add('scanning');
-    el.scanBtnText.textContent = '18 Kaynak Taraniyor...';
+    el.scanBtnText.textContent = `${count} Kaynak Taraniyor...`;
     el.scanBanner.classList.remove('hidden');
-    el.scanBannerText.textContent = '18 CTI kaynagina baglaniliyor, beslemeler ayristiriliyor ve puanlaniyor...';
+    el.scanBannerText.textContent = `${count} CTI kaynagina baglaniliyor, beslemeler ayristiriliyor ve puanlaniyor...`;
 
     try {
       const res = await fetch('/api/scan', { method: 'POST' });
       if (!res.ok) throw new Error('Tarama dongusu basarisiz');
       const data = await res.json();
-      
+
       el.scanBannerText.textContent = `Tarama tamamlandi: ${data.new_inserted} yeni tehdit maddesi eklendi, ${data.duplicates_skipped} mukerrer kayit atlandi.`;
       setTimeout(() => {
         el.scanBanner.classList.add('hidden');
@@ -137,6 +182,7 @@
 
       // Verileri guncelle
       await fetchStats();
+      await fetchAnalytics();
       await fetchArticles();
     } catch (err) {
       console.error('Tarama hatasi:', err);
@@ -157,6 +203,225 @@
     animateValue(el.statCritical, stats.high_priority_count || 0);
     animateValue(el.statCve, stats.critical_vulnerabilities || 0);
     animateValue(el.statTr, stats.tr_focus_count || 0);
+  }
+
+  function ensureChart(callback) {
+    if (typeof Chart !== 'undefined') {
+      callback();
+      return;
+    }
+    let script = document.querySelector('script[src*="chart"]');
+    if (!script) {
+      script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', () => callback());
+    const interval = setInterval(() => {
+      if (typeof Chart !== 'undefined') {
+        clearInterval(interval);
+        callback();
+      }
+    }, 100);
+    setTimeout(() => clearInterval(interval), 6000);
+  }
+
+  function renderAnalytics(data) {
+    if (!data) return;
+    ensureChart(() => {
+      drawAnalyticsCharts(data);
+    });
+  }
+
+  function drawAnalyticsCharts(data) {
+    if (!data || typeof Chart === 'undefined') return;
+
+    // Chart.js Global Tema Ayarlari
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+
+    // 1. Tehdit Turu Dagilimi (Doughnut Chart)
+    if (el.chartTags && data.top_tags && data.top_tags.length > 0) {
+      if (state.chartTagsInstance) {
+        state.chartTagsInstance.destroy();
+      }
+
+      const colors = ['#00f2fe', '#ff3366', '#ffb703', '#9d4edd', '#06d6a0', '#3a86ff', '#fb5607', '#a2d2ff'];
+      state.chartTagsInstance = new Chart(el.chartTags, {
+        type: 'doughnut',
+        data: {
+          labels: data.top_tags.map(t => t.label),
+          datasets: [{
+            data: data.top_tags.map(t => t.count),
+            backgroundColor: colors.slice(0, data.top_tags.length),
+            borderColor: '#0b111e',
+            borderWidth: 2,
+            hoverOffset: 4,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '68%',
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: {
+                boxWidth: 10,
+                boxHeight: 10,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                font: { size: 11 },
+                color: '#cbd5e1',
+                padding: 10,
+              },
+            },
+            tooltip: {
+              backgroundColor: '#152033',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderWidth: 1,
+              titleFont: { size: 12, weight: 'bold' },
+              bodyFont: { size: 12 },
+              padding: 10,
+              callbacks: {
+                label: function (ctx) {
+                  const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                  const val = ctx.parsed;
+                  const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+                  return ` ${ctx.label}: ${val} (%${pct})`;
+                }
+              }
+            },
+          },
+        },
+      });
+    }
+
+    // 2. En Cok Hedeflenen Ureticiler (Horizontal Bar Chart)
+    if (el.chartVendors && data.top_vendors && data.top_vendors.length > 0) {
+      if (state.chartVendorsInstance) {
+        state.chartVendorsInstance.destroy();
+      }
+
+      state.chartVendorsInstance = new Chart(el.chartVendors, {
+        type: 'bar',
+        data: {
+          labels: data.top_vendors.map(v => v.vendor),
+          datasets: [{
+            label: 'Tespit Sayisi',
+            data: data.top_vendors.map(v => v.count),
+            backgroundColor: 'rgba(0, 242, 254, 0.55)',
+            borderColor: '#00f2fe',
+            borderWidth: 1.5,
+            borderRadius: 4,
+            hoverBackgroundColor: 'rgba(0, 242, 254, 0.85)',
+          }],
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#152033',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderWidth: 1,
+              padding: 10,
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255, 255, 255, 0.04)' },
+              ticks: { color: '#64748b', font: { size: 10 }, stepSize: 1 },
+            },
+            y: {
+              grid: { display: false },
+              ticks: { color: '#cbd5e1', font: { size: 11, weight: '500' } },
+            },
+          },
+        },
+      });
+    }
+
+    // 3. Aktivite Nabzi (Timeline Area Chart)
+    if (el.chartTimeline && data.timeline && data.timeline.length > 0) {
+      if (state.chartTimelineInstance) {
+        state.chartTimelineInstance.destroy();
+      }
+
+      state.chartTimelineInstance = new Chart(el.chartTimeline, {
+        type: 'line',
+        data: {
+          labels: data.timeline.map(t => {
+            const parts = t.date.split('-');
+            return parts.length === 3 ? `${parts[2]}/${parts[1]}` : t.date;
+          }),
+          datasets: [
+            {
+              label: 'Toplam Tehditler',
+              data: data.timeline.map(t => t.total),
+              borderColor: '#00f2fe',
+              backgroundColor: 'rgba(0, 242, 254, 0.12)',
+              fill: true,
+              tension: 0.35,
+              borderWidth: 2,
+              pointBackgroundColor: '#00f2fe',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+            },
+            {
+              label: 'Kritik Alarmlar (50+)',
+              data: data.timeline.map(t => t.critical),
+              borderColor: '#ff3366',
+              backgroundColor: 'rgba(255, 51, 102, 0.12)',
+              fill: true,
+              tension: 0.35,
+              borderWidth: 2,
+              pointBackgroundColor: '#ff3366',
+              pointRadius: 4,
+              pointHoverRadius: 6,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              align: 'end',
+              labels: {
+                boxWidth: 10,
+                boxHeight: 10,
+                usePointStyle: true,
+                pointStyle: 'circle',
+                font: { size: 11 },
+                color: '#cbd5e1',
+                padding: 14,
+              },
+            },
+            tooltip: {
+              backgroundColor: '#152033',
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderWidth: 1,
+              padding: 10,
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(255, 255, 255, 0.04)' },
+              ticks: { color: '#64748b', font: { size: 11 } },
+            },
+            y: {
+              grid: { color: 'rgba(255, 255, 255, 0.04)' },
+              ticks: { color: '#64748b', font: { size: 11 }, stepSize: 1 },
+              beginAtZero: true,
+            },
+          },
+        },
+      });
+    }
   }
 
   function animateValue(elem, end) {
@@ -418,6 +683,41 @@
       el.modalTags.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Etiket atanmadi</span>';
     }
 
+    // Makaleye Ait Tehdit Göstergeleri (IoC)
+    if (el.modalIocsWrap && el.modalIocsList) {
+      el.modalIocsList.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Tehdit gostergeleri taranıyor...</span>';
+      el.modalIocsWrap.classList.remove('hidden');
+      fetch(`/api/iocs?article_id=${article.id}`)
+        .then(r => r.json())
+        .then(data => {
+          const iocs = data.iocs || [];
+          if (iocs.length > 0) {
+            el.modalIocsList.innerHTML = iocs.map(ioc => {
+              const badgeClass = 'ioc-badge-' + ioc.type;
+              return `
+                <div class="modal-ioc-item">
+                  <span class="ioc-type-badge ${badgeClass}">${escapeHtml(ioc.type.toUpperCase())}</span>
+                  <span class="ioc-val">${escapeHtml(ioc.value)}</span>
+                  <button class="btn-copy-ioc" data-val="${escapeHtml(ioc.value)}" title="Panoya Kopyala">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span>Kopyala</span>
+                  </button>
+                </div>
+              `;
+            }).join('');
+          } else {
+            el.modalIocsWrap.classList.add('hidden');
+          }
+        })
+        .catch(err => {
+          console.error('Makale IoC yuklenirken hata:', err);
+          el.modalIocsWrap.classList.add('hidden');
+        });
+    }
+
     el.articleModal.classList.remove('hidden');
   }
 
@@ -442,6 +742,130 @@
 
   function closeSourcesModal() {
     el.sourcesModal.classList.add('hidden');
+  }
+
+  // --- IoC Havuzu Yonetimi ---
+
+  async function fetchIoCCounts() {
+    try {
+      const res = await fetch('/api/iocs?limit=1000');
+      if (!res.ok) return;
+      const data = await res.json();
+      const all = data.iocs || [];
+      state.iocCounts.all = all.length;
+      state.iocCounts.ip = all.filter(i => i.type === 'ip').length;
+      state.iocCounts.domain = all.filter(i => i.type === 'domain').length;
+      state.iocCounts.sha256 = all.filter(i => i.type === 'sha256').length;
+      state.iocCounts.md5 = all.filter(i => i.type === 'md5').length;
+
+      if (el.iocCountAll) el.iocCountAll.textContent = state.iocCounts.all;
+      if (el.iocCountIp) el.iocCountIp.textContent = state.iocCounts.ip;
+      if (el.iocCountDomain) el.iocCountDomain.textContent = state.iocCounts.domain;
+      if (el.iocCountSha256) el.iocCountSha256.textContent = state.iocCounts.sha256;
+      if (el.iocCountMd5) el.iocCountMd5.textContent = state.iocCounts.md5;
+    } catch (err) {
+      console.error('IoC sayilari yuklenemedi:', err);
+    }
+  }
+
+  async function fetchIoCs() {
+    try {
+      const params = new URLSearchParams();
+      if (state.iocType) params.set('type', state.iocType);
+      if (state.iocSearch) params.set('search', state.iocSearch);
+      params.set('limit', '250');
+
+      const res = await fetch(`/api/iocs?${params.toString()}`);
+      if (!res.ok) throw new Error('IoC verisi alinamadi');
+      const data = await res.json();
+      state.iocs = data.iocs || [];
+      renderIoCTable(state.iocs);
+    } catch (err) {
+      console.error('IoC listesi yuklenirken hata:', err);
+    }
+  }
+
+  function renderIoCTable(iocs) {
+    if (!el.iocTableBody) return;
+
+    if (!iocs || iocs.length === 0) {
+      el.iocTableBody.innerHTML = '';
+      if (el.iocEmptyState) el.iocEmptyState.classList.remove('hidden');
+      return;
+    }
+
+    if (el.iocEmptyState) el.iocEmptyState.classList.add('hidden');
+    el.iocTableBody.innerHTML = iocs.map(ioc => {
+      const badgeClass = 'ioc-badge-' + ioc.type;
+      const threatContext = ioc.threat_context || ioc.context || '';
+
+      let contextDisplay = '<span style="color: var(--text-muted);">-</span>';
+      if (threatContext) {
+        if (ioc.url) {
+          contextDisplay = `
+            <a href="${escapeHtml(ioc.url)}" target="_blank" rel="noopener noreferrer" class="ioc-news-link" title="Haberi yeni sekmede aç: ${escapeHtml(threatContext)}">
+              <span>${escapeHtml(threatContext)}</span>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          `;
+        } else {
+          contextDisplay = `<span>${escapeHtml(threatContext)}</span>`;
+        }
+      }
+
+      let sourceDisplay = '<span style="color: var(--text-muted);">-</span>';
+      if (ioc.source) {
+        if (ioc.url) {
+          sourceDisplay = `
+            <a href="${escapeHtml(ioc.url)}" target="_blank" rel="noopener noreferrer" class="ioc-source-tag ioc-source-link" title="Orijinal Haber Kaynağına Git: ${escapeHtml(ioc.source)}">
+              <span>${escapeHtml(ioc.source)}</span>
+              <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          `;
+        } else {
+          sourceDisplay = `<span class="ioc-source-tag">${escapeHtml(ioc.source)}</span>`;
+        }
+      }
+
+      const timeDisplay = formatTimeAgo(ioc.first_seen || ioc.created_at) || ((ioc.first_seen || ioc.created_at) ? (ioc.first_seen || ioc.created_at).slice(0, 10) : '-');
+
+      return `
+        <tr>
+          <td><span class="ioc-type-badge ${badgeClass}">${escapeHtml(ioc.type.toUpperCase())}</span></td>
+          <td><span class="ioc-val">${escapeHtml(ioc.value)}</span></td>
+          <td>${sourceDisplay}</td>
+          <td><div class="ioc-context">${contextDisplay}</div></td>
+          <td style="color: var(--text-muted); font-size: 0.8rem;">${timeDisplay}</td>
+          <td style="text-align: center;">
+            <button class="btn-copy-ioc" data-val="${escapeHtml(ioc.value)}" title="Panoya Kopyala">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Kopyala</span>
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function openIocsModal() {
+    fetchIoCCounts();
+    fetchIoCs();
+    if (el.iocsModal) el.iocsModal.classList.remove('hidden');
+  }
+
+  function closeIocsModal() {
+    if (el.iocsModal) el.iocsModal.classList.add('hidden');
   }
 
   // --- Yardimci Fonksiyonlar ---
@@ -544,6 +968,59 @@
       if (e.target === el.sourcesModal) closeSourcesModal();
     });
 
+    // IoC Modali Olaylari
+    if (el.btnIocs) el.btnIocs.addEventListener('click', openIocsModal);
+    if (el.iocsCloseBtn) el.iocsCloseBtn.addEventListener('click', closeIocsModal);
+    if (el.iocsModal) {
+      el.iocsModal.addEventListener('click', (e) => {
+        if (e.target === el.iocsModal) closeIocsModal();
+      });
+    }
+
+    if (el.iocTypePills) {
+      el.iocTypePills.querySelectorAll('.pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          el.iocTypePills.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+          state.iocType = pill.dataset.type || '';
+          fetchIoCs();
+        });
+      });
+    }
+
+    let iocSearchTimeout = null;
+    if (el.iocSearchInput) {
+      el.iocSearchInput.addEventListener('input', (e) => {
+        clearTimeout(iocSearchTimeout);
+        iocSearchTimeout = setTimeout(() => {
+          state.iocSearch = e.target.value.trim();
+          fetchIoCs();
+        }, 300);
+      });
+    }
+
+    // Genel Panoya Kopyalama Butonlari Dinleyicisi
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.btn-copy-ioc');
+      if (btn) {
+        const val = btn.dataset.val;
+        if (val) {
+          navigator.clipboard.writeText(val).then(() => {
+            const span = btn.querySelector('span');
+            const origText = span ? span.textContent : 'Kopyala';
+            if (span) span.textContent = 'Kopyalandı!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+              if (span) span.textContent = origText;
+              btn.classList.remove('copied');
+            }, 1500);
+          }).catch(err => {
+            console.error('Panoya kopyalanamadi:', err);
+          });
+        }
+      }
+    });
+
     el.modalCloseBtn.addEventListener('click', closeArticleModal);
     el.modalCloseFooter.addEventListener('click', closeArticleModal);
     el.articleModal.addEventListener('click', (e) => {
@@ -554,11 +1031,39 @@
       if (e.key === 'Escape') {
         closeArticleModal();
         closeSourcesModal();
+        closeIocsModal();
       }
     });
 
+    // Analitik Panelini Gizle / Goster
+    if (el.btnToggleAnalytics && el.analyticsChartsContainer) {
+      if (state.analyticsCollapsed) {
+        el.analyticsChartsContainer.classList.add('collapsed');
+        el.btnToggleAnalytics.classList.add('collapsed');
+        if (el.toggleAnalyticsText) el.toggleAnalyticsText.textContent = 'Grafikleri Goster';
+      }
+
+      el.btnToggleAnalytics.addEventListener('click', () => {
+        state.analyticsCollapsed = !state.analyticsCollapsed;
+        localStorage.setItem('ctifeed_analytics_collapsed', state.analyticsCollapsed);
+        if (state.analyticsCollapsed) {
+          el.analyticsChartsContainer.classList.add('collapsed');
+          el.btnToggleAnalytics.classList.add('collapsed');
+          if (el.toggleAnalyticsText) el.toggleAnalyticsText.textContent = 'Grafikleri Goster';
+        } else {
+          el.analyticsChartsContainer.classList.remove('collapsed');
+          el.btnToggleAnalytics.classList.remove('collapsed');
+          if (el.toggleAnalyticsText) el.toggleAnalyticsText.textContent = 'Grafikleri Gizle';
+          if (state.chartTagsInstance) state.chartTagsInstance.resize();
+          if (state.chartVendorsInstance) state.chartVendorsInstance.resize();
+          if (state.chartTimelineInstance) state.chartTimelineInstance.resize();
+        }
+      });
+    }
+
     setInterval(() => {
       fetchStats();
+      fetchAnalytics();
     }, 30000);
   }
 
@@ -566,6 +1071,7 @@
     initListeners();
     await Promise.all([
       fetchStats(),
+      fetchAnalytics(),
       fetchSources(),
       fetchArticles(),
     ]);

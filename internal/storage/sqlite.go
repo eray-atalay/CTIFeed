@@ -698,13 +698,14 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		SourceShare: make([]TagStat, 0),
 	}
 
-	// 1. Ortalama Skor
-	_ = d.conn.QueryRowContext(ctx, "SELECT COALESCE(AVG(score), 0) FROM articles;").Scan(&data.AverageScore)
+	// 1. Ortalama Skor (Telegram ham bot bildirimleri yerine gercek istihbarat ve kritik alarmlari temel al)
+	_ = d.conn.QueryRowContext(ctx, "SELECT COALESCE(AVG(score), 0) FROM articles WHERE (source NOT LIKE 'Telegram%' OR score >= 50);").Scan(&data.AverageScore)
 
-	// 2. Kaynak Dağılımı (Top 8)
+	// 2. Kaynak Dağılımı (Top 8) - Telegram için yalnızca kritik eşiği geçenler sayılır
 	srcRows, err := d.conn.QueryContext(ctx, `
 		SELECT source, COUNT(*) as cnt 
 		FROM articles 
+		WHERE (source NOT LIKE 'Telegram%' OR score >= 50)
 		GROUP BY source 
 		ORDER BY cnt DESC 
 		LIMIT 8;
@@ -720,7 +721,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		}
 	}
 
-	// 3. Son 7 Günün Aktivite Zaman Çizelgesi
+	// 3. Son 7 Günün Aktivite Zaman Çizelgesi (Telegram bot gurultusu filtrelenmis)
 	timeRows, err := d.conn.QueryContext(ctx, `
 		SELECT 
 			strftime('%Y-%m-%d', published_at) AS day,
@@ -728,6 +729,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 			COALESCE(SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END), 0) AS critical
 		FROM articles
 		WHERE published_at >= datetime('now', '-7 days')
+		  AND (source NOT LIKE 'Telegram%' OR score >= 50)
 		GROUP BY day
 		ORDER BY day ASC;
 	`)
@@ -746,9 +748,12 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		"cve":          "CVE Zafiyetleri",
 		"tr-focus":     "TR-Focus (USOM/TR)",
 		"zero-day":     "Zero-Day",
+		"in-the-wild":  "Aktif İstismar (In-the-Wild)",
 		"ransomware":   "Ransomware",
 		"rce":          "RCE İstismarı",
+		"auth-bypass":  "Yetki Atlama (Auth Bypass)",
 		"data-breach":  "Veri Sızıntısı",
+		"infostealer":  "Veri Hırsızı (Infostealer)",
 		"phishing":     "Oltalama (Phishing)",
 		"malware":      "Zararlı Yazılım",
 		"supply-chain": "Tedarik Zinciri",
@@ -760,6 +765,10 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		"cisco":     "Cisco",
 		"vmware":    "VMware",
 		"wordpress": "WordPress",
+		"citrix":    "Citrix",
+		"sonicwall": "SonicWall",
+		"atlassian": "Atlassian",
+		"veeam":     "Veeam",
 		"linux":     "Linux",
 		"apache":    "Apache",
 		"ivanti":    "Ivanti",
@@ -771,7 +780,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 	tagCounts := make(map[string]int)
 	vendorCounts := make(map[string]int)
 
-	tagRows, err := d.conn.QueryContext(ctx, "SELECT tags FROM articles;")
+	tagRows, err := d.conn.QueryContext(ctx, "SELECT tags FROM articles WHERE (source NOT LIKE 'Telegram%' OR score >= 50);")
 	if err == nil {
 		defer tagRows.Close()
 		for tagRows.Next() {

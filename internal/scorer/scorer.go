@@ -16,7 +16,7 @@ var (
 	htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
 )
 
-// Türkiye odağı için taranacak anahtar kelimeler (büyük/küçük harf duyarsız kontrol edilir)
+// Türkiye odağı için taranacak anahtar kelimeler ve kurumlar (büyük/küçük harf duyarsız kontrol edilir)
 var turkeyKeywords = []string{
 	"turkey",
 	"türkiye",
@@ -26,30 +26,118 @@ var turkeyKeywords = []string{
 	"btk",
 	"ankara",
 	"istanbul",
+	"e-devlet",
+	"sgk",
+	"gib",
+	"tcmb",
+	"bddk",
+	"epdk",
+	"tubitak",
+	"tübitak",
+	"aselsan",
+	"havelsan",
+	"tai",
+	"tusas",
+	"tusaş",
+	"botas",
+	"botaş",
+	"tupras",
+	"tüpraş",
+	"turkcell",
+	"vodafone",
+	"türk telekom",
+	"turk telekom",
+	"bkm",
+	"bist",
 }
 
-// Kritik kurumsal servis ve ürünler ile kanonik etiket adları
+// Aktif İstismar ve PoC (In-the-Wild / Exploit) göstergeleri (+25 Puan)
+var activeExploitation = map[string]string{
+	"actively exploited": "in-the-wild",
+	"in the wild":        "in-the-wild",
+	"in-the-wild":        "in-the-wild",
+	"under attack":       "active-exploitation",
+	"targeted attack":    "active-exploitation",
+	"targeted attacks":   "active-exploitation",
+	"poc available":      "poc",
+	"exploit code":       "poc",
+	"proof-of-concept":   "poc",
+	"proof of concept":   "poc",
+	"weaponized":         "active-exploitation",
+	"cisa kev":           "in-the-wild",
+	"known exploited":    "in-the-wild",
+}
+
+// Kritik kurumsal servis, ağ cihazı ve ürünler ile kanonik etiket adları (+30 Puan)
 var criticalProducts = map[string]string{
-	"fortinet":         "fortinet",
-	"fortios":          "fortinet",
-	"wordpress":        "wordpress",
-	"palo alto":        "palo-alto",
-	"cisco":            "cisco",
-	"ivanti":           "ivanti",
-	"vmware":           "vmware",
+	// Ağ ve Güvenlik Çevresi (Firewall / VPN / Gateway)
+	"fortinet":    "fortinet",
+	"fortios":     "fortinet",
+	"palo alto":   "palo-alto",
+	"cisco":       "cisco",
+	"ivanti":      "ivanti",
+	"citrix":      "citrix",
+	"netscaler":   "citrix",
+	"sonicwall":   "sonicwall",
+	"check point": "check-point",
+	"checkpoint":  "check-point",
+	"f5":          "f5",
+	"big-ip":      "f5",
+	"juniper":     "juniper",
+
+	// Yedekleme ve Dosya Transferi (Fidye Yazılımlarının Ana Hedefleri)
+	"veeam":      "veeam",
+	"moveit":     "moveit",
+	"goanywhere": "goanywhere",
+
+	// Sanallaştırma ve Bulut Altyapısı
+	"vmware":       "vmware",
+	"kubernetes":   "kubernetes",
+	"openssh":      "openssh",
+	"linux kernel": "linux",
+
+	// Kimlik Yönetimi ve Kurumsal İş Yazılımları
 	"exchange":         "microsoft-exchange",
 	"active directory": "active-directory",
+	"entra id":         "entra-id",
+	"azure ad":         "entra-id",
+	"sharepoint":       "sharepoint",
+	"outlook":          "outlook",
+	"atlassian":        "atlassian",
+	"confluence":       "atlassian",
+	"jira":             "atlassian",
+	"wordpress":        "wordpress",
 }
 
-// Kritik tehdit vektörleri ve kanonik etiket adları
+// Kritik tehdit vektörleri ve kanonik etiket adları (+20 Puan)
 var threatVectors = map[string]string{
-	"zero-day":    "zero-day",
-	"0-day":       "zero-day",
-	"rce":         "rce",
-	"ransomware":  "ransomware",
-	"data breach": "data-breach",
-	"leak":        "leak",
-	"apt":         "apt",
+	// Kod Çalıştırma ve Yetki
+	"zero-day":              "zero-day",
+	"0-day":                 "zero-day",
+	"rce":                   "rce",
+	"auth bypass":           "auth-bypass",
+	"authentication bypass": "auth-bypass",
+	"privilege escalation":  "privilege-escalation",
+	"privesc":               "privilege-escalation",
+	"pre-auth":              "pre-auth",
+
+	// Zararlı Yazılım ve Casusluk
+	"ransomware": "ransomware",
+	"infostealer": "infostealer",
+	"stealer":    "infostealer",
+	"wiper":      "wiper",
+	"spyware":    "spyware",
+	"c2":         "c2",
+	"command and control": "c2",
+
+	// Sızıntı, Casusluk ve Altyapı
+	"data breach":  "data-breach",
+	"leak":         "leak",
+	"apt":          "apt",
+	"supply chain": "supply-chain",
+	"ssrf":         "ssrf",
+	"sql injection": "sqli",
+	"sqli":         "sqli",
 }
 
 // StripHTML, metin içerisindeki HTML etiketlerini ve özel karakter kodlamalarını temizler.
@@ -74,7 +162,7 @@ func Evaluate(title, summary string) model.ScoringResult {
 	// 1. Türkiye Odağı (+50 Puan)
 	hasTR := false
 	for _, kw := range turkeyKeywords {
-		if strings.Contains(combined, kw) {
+		if containsWordOrPhrase(combined, kw) {
 			hasTR = true
 			break
 		}
@@ -85,7 +173,18 @@ func Evaluate(title, summary string) model.ScoringResult {
 		breakdown["TR-Focus"] = 50
 	}
 
-	// 2. Kritik Servis/Ürün Zafiyetleri (+30 Puan)
+	// 2. Regex Tabanlı CVE Tespiti (+35 Puan)
+	rawCVEs := cveRegex.FindAllString(title+" "+summary, -1)
+	if len(rawCVEs) > 0 {
+		score += 35
+		for _, raw := range rawCVEs {
+			cve := strings.ToUpper(strings.TrimSpace(raw))
+			tagSet[cve] = struct{}{}
+		}
+		breakdown["CVE-Detected"] = 35
+	}
+
+	// 3. Kritik Kurumsal Servis/Ürün Zafiyetleri (+30 Puan)
 	matchedProducts := make(map[string]struct{})
 	for kw, canonicalTag := range criticalProducts {
 		if containsWordOrPhrase(combined, kw) {
@@ -100,18 +199,22 @@ func Evaluate(title, summary string) model.ScoringResult {
 		breakdown["Critical-Products"] = 30
 	}
 
-	// 3. Regex Tabanlı CVE Tespiti (+35 Puan)
-	rawCVEs := cveRegex.FindAllString(title+" "+summary, -1)
-	if len(rawCVEs) > 0 {
-		score += 35
-		for _, raw := range rawCVEs {
-			cve := strings.ToUpper(strings.TrimSpace(raw))
-			tagSet[cve] = struct{}{}
+	// 4. Aktif Sömürü ve PoC Göstergeleri (+25 Puan)
+	matchedExploits := make(map[string]struct{})
+	for kw, canonicalTag := range activeExploitation {
+		if containsWordOrPhrase(combined, kw) {
+			matchedExploits[canonicalTag] = struct{}{}
 		}
-		breakdown["CVE-Detected"] = 35
+	}
+	if len(matchedExploits) > 0 {
+		score += 25
+		for expTag := range matchedExploits {
+			tagSet[expTag] = struct{}{}
+		}
+		breakdown["Active-Exploitation"] = 25
 	}
 
-	// 4. Kritik Tehdit Vektörleri (+20 Puan)
+	// 5. Kritik Tehdit Vektörleri (+20 Puan)
 	matchedVectors := make(map[string]struct{})
 	for kw, canonicalTag := range threatVectors {
 		if containsWordOrPhrase(combined, kw) {
@@ -142,7 +245,7 @@ func Evaluate(title, summary string) model.ScoringResult {
 
 // containsWordOrPhrase, kelime öbeği veya kelime sınırı kurallarına göre metin eşleşmesi yapar.
 func containsWordOrPhrase(text, target string) bool {
-	// Çoklu kelime öbeklerinde (ör. "palo alto", "active directory", "data breach") doğrudan arama yapılır
+	// Çoklu kelime öbeklerinde (ör. "palo alto", "active directory", "in the wild") doğrudan arama yapılır
 	if strings.Contains(target, " ") || strings.Contains(target, "-") {
 		return strings.Contains(text, target)
 	}
@@ -153,8 +256,9 @@ func containsWordOrPhrase(text, target string) bool {
 		return re.MatchString(text)
 	}
 
-	// "rce", "apt" gibi çok kısa kısaltmalarda hatalı pozitifleri önlemek için kelime sınırları (\b) aranır
-	if len(target) <= 3 {
+	// Kısa kısaltmalarda veya tekil kelimelerde hatalı pozitifleri önlemek için kelime sınırları (\b) aranır
+	// (Örn. "rce", "apt", "f5", "c2", "sgk", "gib", "btk", "bist", "ssrf")
+	if len(target) <= 4 {
 		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(target) + `\b`)
 		return re.MatchString(text)
 	}

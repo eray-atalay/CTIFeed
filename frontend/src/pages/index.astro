@@ -3,8 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import Header from '../components/Header.astro';
 import Metrics from '../components/Metrics.astro';
 import Analytics from '../components/Analytics.astro';
-import Toolbar from '../components/Toolbar.astro';
-import FeedGrid from '../components/FeedGrid.astro';
+import ThreatFeed from '../components/islands/ThreatFeed';
 import Modals from '../components/Modals.astro';
 ---
 
@@ -13,8 +12,7 @@ import Modals from '../components/Modals.astro';
   <main class="main-container">
     <Metrics />
     <Analytics />
-    <Toolbar />
-    <FeedGrid />
+    <ThreatFeed client:load />
   </main>
   <Modals />
 </Layout>

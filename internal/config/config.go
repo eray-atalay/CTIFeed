@@ -47,6 +47,7 @@ func DefaultSources() []model.FeedSource {
 		{Name: "CrowdStrike Blog", URL: "https://www.crowdstrike.com/en-us/blog/feed", Category: "Threat Research & Adversaries"},
 		{Name: "ESET WeLiveSecurity", URL: "https://www.welivesecurity.com/en/rss/feed/", Category: "APT & Malware Research"},
 		{Name: "Red Canary Blog", URL: "https://redcanary.com/blog/feed/", Category: "Threat Research & Detection"},
+		{Name: "Telegram: cveNotify",URL:"telegram://cveNotify",Category: "Telegram CVE",},
 	}
 }
 

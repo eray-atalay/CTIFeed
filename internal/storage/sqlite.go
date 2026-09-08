@@ -318,7 +318,8 @@ type ArticleFilter struct {
 	MinScore int
 	Limit    int
 	Offset   int
-	SortBy   string // "score" veya "date"
+	SortBy   string
+	TimeRange string
 }
 
 // QueryArticles, verilen kriterlere göre haberleri filtreler ve eşleşen listeyle toplam kayıt sayısını döner.
@@ -336,6 +337,16 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 	whereClauses := []string{"1=1"}
 	var args []any
 
+	if filter.TimeRange != "" {
+    switch filter.TimeRange {
+    case "today":
+        whereClauses = append(whereClauses, "published_at >= datetime('now', '-1 day')")
+    case "1w":
+        whereClauses = append(whereClauses, "published_at >= datetime('now', '-7 days')")
+    case "2w":
+        whereClauses = append(whereClauses, "published_at >= datetime('now', '-14 days')")
+    	}
+	}
 	if filter.MinScore > 0 {
 		whereClauses = append(whereClauses, "score >= ?")
 		args = append(args, filter.MinScore)

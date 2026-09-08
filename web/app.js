@@ -547,9 +547,11 @@
     const tagsHTML = (article.tags || []).map(t => {
       const isCVE = t.toUpperCase().startsWith('CVE-');
       const isTR = t === 'TR-Focus';
+      const isExploit = t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation';
       let tagClass = 'tag-item';
       if (isCVE) tagClass += ' tag-cve';
       if (isTR) tagClass += ' tag-tr';
+      if (isExploit) tagClass += ' tag-exploit';
       return `<button class="${tagClass}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`;
     }).join('');
 
@@ -687,7 +689,12 @@
       `);
     }
 
-    const prodKeywords = ['fortinet', 'cisco', 'wordpress', 'vmware', 'palo-alto', 'microsoft-exchange', 'active-directory', 'ivanti'];
+    const prodKeywords = [
+      'fortinet', 'cisco', 'wordpress', 'vmware', 'palo-alto', 'microsoft-exchange', 
+      'active-directory', 'ivanti', 'citrix', 'sonicwall', 'check-point', 'f5', 
+      'juniper', 'veeam', 'moveit', 'goanywhere', 'atlassian', 'sharepoint', 
+      'outlook', 'entra-id', 'openssh', 'kubernetes', 'linux'
+    ];
     const matchedProds = (article.tags || []).filter(t => prodKeywords.includes(t));
     if (matchedProds.length > 0) {
       breakdownHTML.push(`
@@ -698,7 +705,22 @@
       `);
     }
 
-    const threatVecs = ['zero-day', 'rce', 'ransomware', 'data-breach', 'leak', 'apt'];
+    const exploitKeywords = ['in-the-wild', 'poc', 'active-exploitation'];
+    const matchedExploits = (article.tags || []).filter(t => exploitKeywords.includes(t));
+    if (matchedExploits.length > 0) {
+      breakdownHTML.push(`
+        <div class="breakdown-item">
+          <span>Aktif Somuru / PoC Tespit Edildi (${matchedExploits.join(', ')})</span>
+          <span class="breakdown-badge" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">+25 PUAN</span>
+        </div>
+      `);
+    }
+
+    const threatVecs = [
+      'zero-day', 'rce', 'ransomware', 'data-breach', 'leak', 'apt', 
+      'auth-bypass', 'privilege-escalation', 'pre-auth', 'infostealer', 
+      'wiper', 'spyware', 'c2', 'supply-chain', 'ssrf', 'sqli'
+    ];
     const matchedThreats = (article.tags || []).filter(t => threatVecs.includes(t));
     if (matchedThreats.length > 0) {
       breakdownHTML.push(`
@@ -724,6 +746,12 @@
       el.modalTags.innerHTML = article.tags.map(t => {
         if (t.toUpperCase().startsWith('CVE-')) {
           return `<a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(t)}" target="_blank" rel="noopener noreferrer" class="tag-item tag-cve" title="NIST NVD uzerinde incele">[CVE] ${escapeHtml(t)}</a>`;
+        }
+        if (t === 'TR-Focus') {
+          return `<span class="tag-item tag-tr">${escapeHtml(t)}</span>`;
+        }
+        if (t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation') {
+          return `<span class="tag-item tag-exploit">${escapeHtml(t)}</span>`;
         }
         return `<span class="tag-item">${escapeHtml(t)}</span>`;
       }).join('');

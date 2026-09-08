@@ -34,8 +34,29 @@ func TestTurkeyFocusScoring(t *testing.T) {
 			tag:      "TR-Focus",
 		},
 		{
-			name:     "No Turkey mention",
-			title:    "Global Cyber Trends 2024",
+			name:     "Turkish bank BDDK alert",
+			title:    "Financial Sector Security Warning Issued by BDDK",
+			summary:  "Banking trojans targeting online accounts in Ankara.",
+			expected: 50,
+			tag:      "TR-Focus",
+		},
+		{
+			name:     "Aselsan and defense sector mention",
+			title:    "Espionage Group Targets Turkish Defense Contractor Aselsan",
+			summary:  "Phishing emails impersonating government agencies.",
+			expected: 50,
+			tag:      "TR-Focus",
+		},
+		{
+			name:     "E-Devlet phishing warning",
+			title:    "Fraudsters Launch Fake E-Devlet Portals",
+			summary:  "Citizens warned against credential harvesting campaigns.",
+			expected: 50,
+			tag:      "TR-Focus",
+		},
+		{
+			name:     "No Turkey mention (boundary check for short words like gibberish)",
+			title:    "Gibberish Text in Open Source Repository",
 			summary:  "Security updates for worldwide organizations.",
 			expected: 0,
 			tag:      "TR-Focus",
@@ -89,6 +110,27 @@ func TestCriticalProductsScoring(t *testing.T) {
 	}
 }
 
+func TestNewCriticalProductsScoring(t *testing.T) {
+	res := Evaluate("Critical Citrix NetScaler and Veeam Backup Vulnerabilities", "Atlassian Confluence servers and SonicWall gateways are under siege.")
+	if res.Breakdown["Critical-Products"] != 30 {
+		t.Fatalf("expected Critical-Products score 30, got %d", res.Breakdown["Critical-Products"])
+	}
+
+	expectedTags := []string{"atlassian", "citrix", "sonicwall", "veeam"}
+	for _, exp := range expectedTags {
+		found := false
+		for _, tag := range res.Tags {
+			if tag == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected product tag %s in %v", exp, res.Tags)
+		}
+	}
+}
+
 func TestCVEDetectionScoring(t *testing.T) {
 	res := Evaluate("Proof of Concept Released for CVE-2024-21762 and CVE-2023-48788", "Patch immediately to prevent remote exploitation.")
 	if res.Breakdown["CVE-Detected"] != 35 {
@@ -106,6 +148,27 @@ func TestCVEDetectionScoring(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("expected CVE tag %s in %v", cve, res.Tags)
+		}
+	}
+}
+
+func TestActiveExploitationScoring(t *testing.T) {
+	res := Evaluate("Flaw Observed Actively Exploited in the Wild", "Security researchers noted that exploit code and PoC available on GitHub.")
+	if res.Breakdown["Active-Exploitation"] != 25 {
+		t.Fatalf("expected Active-Exploitation score 25, got %d", res.Breakdown["Active-Exploitation"])
+	}
+
+	expectedTags := []string{"in-the-wild", "poc"}
+	for _, exp := range expectedTags {
+		found := false
+		for _, tag := range res.Tags {
+			if tag == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected exploit tag %s in %v", exp, res.Tags)
 		}
 	}
 }
@@ -131,18 +194,40 @@ func TestThreatVectorsScoring(t *testing.T) {
 	}
 }
 
+func TestNewThreatVectorsScoring(t *testing.T) {
+	res := Evaluate("Authentication Bypass and SSRF Flaws Allow Pre-Auth Remote Access", "Attackers deploy Infostealer and connect to external C2 servers.")
+	if res.Breakdown["Threat-Vectors"] != 20 {
+		t.Fatalf("expected Threat-Vectors score 20, got %d", res.Breakdown["Threat-Vectors"])
+	}
+
+	expectedVectors := []string{"auth-bypass", "c2", "infostealer", "pre-auth", "ssrf"}
+	for _, exp := range expectedVectors {
+		found := false
+		for _, tag := range res.Tags {
+			if tag == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected threat vector tag %s in %v", exp, res.Tags)
+		}
+	}
+}
+
 func TestCumulativeScoring(t *testing.T) {
-	// 4 kategorinin tumuyle eslesen ornek haber:
+	// 5 kategorinin tumuyle eslesen ornek haber:
 	// 1. Turkiye Odagi (+50): "Turkish", "USOM"
 	// 2. Kritik Urun (+30): "Fortinet", "WordPress"
 	// 3. CVE (+35): "CVE-2024-12345"
-	// 4. Tehdit Vektoru (+20): "zero-day", "RCE", "ransomware"
-	// Toplam Puan: 50 + 30 + 35 + 20 = 135
-	title := "Turkish Institutions Warned by USOM: Zero-Day RCE in Fortinet (CVE-2024-12345) Leveraged in Ransomware Attacks"
+	// 4. Aktif Somuru (+25): "actively exploited"
+	// 5. Tehdit Vektoru (+20): "zero-day", "RCE", "ransomware"
+	// Toplam Puan: 50 + 35 + 30 + 25 + 20 = 160
+	title := "Turkish Institutions Warned by USOM: Zero-Day RCE in Fortinet (CVE-2024-12345) Actively Exploited in Ransomware Attacks"
 	summary := "A widespread campaign affecting WordPress sites and Fortinet firewalls in Istanbul."
 
 	res := Evaluate(title, summary)
-	expectedTotal := 50 + 30 + 35 + 20
+	expectedTotal := 50 + 35 + 30 + 25 + 20
 	if res.Score != expectedTotal {
 		t.Fatalf("expected total score %d, got %d (breakdown: %+v)", expectedTotal, res.Score, res.Breakdown)
 	}

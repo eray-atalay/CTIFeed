@@ -51,8 +51,8 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	mux.HandleFunc("GET /api/articles", s.handleGetArticles)
 	mux.HandleFunc("POST /api/scan", s.handlePostScan)
 
-	// Gömülü web.Assets üzerinden Statik Varlık Sunucusu
-	staticFS, err := fs.Sub(web.Assets, ".")
+	// Gömülü web.Assets üzerinden Statik Varlık Sunucusu (Astro Dist)
+	staticFS, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
 		slog.Error("Failed to create static sub-FS", slog.String("error", err.Error()))
 	}

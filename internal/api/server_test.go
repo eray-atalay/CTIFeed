@@ -64,8 +64,7 @@ func TestStaticAssetsEndpoints(t *testing.T) {
 		contains     string
 	}{
 		{"/", http.StatusOK, "CTIFeed"},
-		{"/style.css", http.StatusOK, "--bg-base"},
-		{"/app.js", http.StatusOK, "CTIFeed Tehdit Radari"},
+		{"/global.css", http.StatusOK, "--bg-base"},
 	}
 
 	for _, tt := range tests {

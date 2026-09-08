@@ -42,6 +42,12 @@ func DefaultSources() []model.FeedSource {
 		{Name: "Krebs on Security", URL: "https://krebsonsecurity.com/category/data-breaches/feed/", Category: "Investigative Security"},
 		{Name: "DarkWebInformer", URL: "https://darkwebinformer.com/rss/", Category: "Dark Web & Leaks"},
 		{Name: "DailyDarkWeb", URL: "https://dailydarkweb.net/feed/", Category: "Dark Web & Leaks"},
+		{Name: "ANY.RUN Blog", URL: "https://any.run/cybersecurity-blog/feed/", Category: "Malware Analysis & IoCs"},
+		{Name: "SANS ISC InfoSec", URL: "https://isc.sans.edu/rssfeed_full.xml", Category: "Honeypot & Attack Diaries"},
+		{Name: "CrowdStrike Blog", URL: "https://www.crowdstrike.com/en-us/blog/feed", Category: "Threat Research & Adversaries"},
+		{Name: "ESET WeLiveSecurity", URL: "https://www.welivesecurity.com/en/rss/feed/", Category: "APT & Malware Research"},
+		{Name: "Red Canary Blog", URL: "https://redcanary.com/blog/feed/", Category: "Threat Research & Detection"},
+		{Name: "Telegram: cveNotify",URL:"telegram://cveNotify",Category: "Telegram CVE",},
 	}
 }
 
@@ -53,7 +59,7 @@ func NewDefaultConfig() *Config {
 		Workers:       5,
 		Timeout:       10 * time.Second,
 		Interval:      15 * time.Minute,
-		MaxAgeHours:   48 * time.Hour,
+		MaxAgeHours:   7 * 24 * time.Hour,
 		DaemonMode:    false,
 		TopArticles:   10,
 		MinScore:      0,

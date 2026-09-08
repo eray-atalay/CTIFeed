@@ -79,6 +79,22 @@ func (d *DB) migrate(ctx context.Context) error {
 			PRIMARY KEY (chat_id, tag)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_subscriptions_tag ON user_subscriptions(tag);`,
+
+		// IoC (Tehdit Göstergeleri) Tablosu ve İndeksleri
+		`CREATE TABLE IF NOT EXISTS iocs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			article_id INTEGER NOT NULL,
+			type TEXT NOT NULL,
+			value TEXT NOT NULL,
+			threat_context TEXT,
+			source TEXT,
+			first_seen DATETIME NOT NULL,
+			FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE,
+			UNIQUE(type, value, article_id)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_iocs_type ON iocs(type);`,
+		`CREATE INDEX IF NOT EXISTS idx_iocs_value ON iocs(value);`,
+		`CREATE INDEX IF NOT EXISTS idx_iocs_first_seen ON iocs(first_seen DESC);`,
 	}
 
 	for _, q := range queries {
@@ -131,6 +147,9 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 		if id, err := res.LastInsertId(); err == nil {
 			article.ID = id
 		}
+		if len(article.IoCs) > 0 {
+			_ = d.SaveIoCs(ctx, article.ID, article.Title, article.Source, article.IoCs)
+		}
 		return true, nil
 	}
 
@@ -155,6 +174,15 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 		return 0, 0, fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer stmt.Close()
+
+	iocStmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
+		VALUES (?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to prepare ioc statement: %w", err)
+	}
+	defer iocStmt.Close()
 
 	now := time.Now().UTC()
 	inserted := 0
@@ -193,6 +221,22 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 			}
 		} else {
 			skipped++
+			// Makale zaten mevcutsa ID'sini çek ki tespit edilen IoC'ler bağlanabilsin
+			if a.ID <= 0 {
+				_ = tx.QueryRowContext(ctx, "SELECT id FROM articles WHERE link = ?", a.Link).Scan(&a.ID)
+			}
+		}
+
+		// Makaleye ait tespit edilmiş IoC'leri kaydet
+		if a.ID > 0 && len(a.IoCs) > 0 {
+			nowStr := now.Format(time.RFC3339)
+			for _, item := range a.IoCs {
+				val := strings.TrimSpace(item.Value)
+				if val == "" {
+					continue
+				}
+				_, _ = iocStmt.ExecContext(ctx, a.ID, item.Type, val, a.Title, a.Source, nowStr)
+			}
 		}
 	}
 
@@ -366,13 +410,14 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 
 // ArticleFilter, haber arama ve filtreleme parametrelerini tanımlar.
 type ArticleFilter struct {
-	Search   string
-	Tag      string
-	Source   string
-	MinScore int
-	Limit    int
-	Offset   int
-	SortBy   string
+	Search    string
+	Tag       string
+	Source    string
+	MinScore  int
+	Limit     int
+	Offset    int
+	SortBy    string
+	TimeRange string
 }
 
 // QueryArticles, verilen kriterlere göre haberleri filtreler ve eşleşen listeyle toplam kayıt sayısını döner.
@@ -390,6 +435,16 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 	whereClauses := []string{"1=1"}
 	var args []any
 
+	if filter.TimeRange != "" {
+		switch filter.TimeRange {
+		case "today":
+			whereClauses = append(whereClauses, "published_at >= datetime('now', '-1 day')")
+		case "1w":
+			whereClauses = append(whereClauses, "published_at >= datetime('now', '-7 days')")
+		case "2w":
+			whereClauses = append(whereClauses, "published_at >= datetime('now', '-14 days')")
+		}
+	}
 	if filter.MinScore > 0 {
 		whereClauses = append(whereClauses, "score >= ?")
 		args = append(args, filter.MinScore)
@@ -603,4 +658,358 @@ func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64,
 		}
 	}
 	return chatIDs, nil
+}
+
+// TagStat, etiket ve kategori istatistiğini tutar.
+type TagStat struct {
+	Tag   string `json:"tag"`
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+// VendorStat, hedeflenen üretici/teknoloji istatistiğini tutar.
+type VendorStat struct {
+	Vendor string `json:"vendor"`
+	Count  int    `json:"count"`
+}
+
+// TimelineStat, günlük tehdit aktivite istatistiğini tutar.
+type TimelineStat struct {
+	Date     string `json:"date"`
+	Total    int    `json:"total"`
+	Critical int    `json:"critical"`
+}
+
+// AnalyticsData, analitik grafikleri ve trend verilerini barındırır.
+type AnalyticsData struct {
+	TopTags      []TagStat      `json:"top_tags"`
+	TopVendors   []VendorStat   `json:"top_vendors"`
+	Timeline     []TimelineStat `json:"timeline"`
+	SourceShare  []TagStat      `json:"source_share"`
+	AverageScore float64        `json:"average_score"`
+}
+
+// GetAnalytics, grafikler için kategorize edilmiş analitik verilerini toplar.
+func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
+	data := &AnalyticsData{
+		TopTags:     make([]TagStat, 0),
+		TopVendors:  make([]VendorStat, 0),
+		Timeline:    make([]TimelineStat, 0),
+		SourceShare: make([]TagStat, 0),
+	}
+
+	// 1. Ortalama Skor
+	_ = d.conn.QueryRowContext(ctx, "SELECT COALESCE(AVG(score), 0) FROM articles;").Scan(&data.AverageScore)
+
+	// 2. Kaynak Dağılımı (Top 8)
+	srcRows, err := d.conn.QueryContext(ctx, `
+		SELECT source, COUNT(*) as cnt 
+		FROM articles 
+		GROUP BY source 
+		ORDER BY cnt DESC 
+		LIMIT 8;
+	`)
+	if err == nil {
+		defer srcRows.Close()
+		for srcRows.Next() {
+			var s TagStat
+			if err := srcRows.Scan(&s.Tag, &s.Count); err == nil {
+				s.Label = s.Tag
+				data.SourceShare = append(data.SourceShare, s)
+			}
+		}
+	}
+
+	// 3. Son 7 Günün Aktivite Zaman Çizelgesi
+	timeRows, err := d.conn.QueryContext(ctx, `
+		SELECT 
+			strftime('%Y-%m-%d', published_at) AS day,
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END), 0) AS critical
+		FROM articles
+		WHERE published_at >= datetime('now', '-7 days')
+		GROUP BY day
+		ORDER BY day ASC;
+	`)
+	if err == nil {
+		defer timeRows.Close()
+		for timeRows.Next() {
+			var t TimelineStat
+			if err := timeRows.Scan(&t.Date, &t.Total, &t.Critical); err == nil {
+				data.Timeline = append(data.Timeline, t)
+			}
+		}
+	}
+
+	// 4. Tehdit Kategorileri ve Hedeflenen Teknolojiler
+	categoryLabels := map[string]string{
+		"cve":          "CVE Zafiyetleri",
+		"tr-focus":     "TR-Focus (USOM/TR)",
+		"zero-day":     "Zero-Day",
+		"ransomware":   "Ransomware",
+		"rce":          "RCE İstismarı",
+		"data-breach":  "Veri Sızıntısı",
+		"phishing":     "Oltalama (Phishing)",
+		"malware":      "Zararlı Yazılım",
+		"supply-chain": "Tedarik Zinciri",
+	}
+
+	vendorLabels := map[string]string{
+		"microsoft": "Microsoft",
+		"fortinet":  "Fortinet",
+		"cisco":     "Cisco",
+		"vmware":    "VMware",
+		"wordpress": "WordPress",
+		"linux":     "Linux",
+		"apache":    "Apache",
+		"ivanti":    "Ivanti",
+		"apple":     "Apple",
+		"google":    "Google",
+		"palo-alto": "Palo Alto",
+	}
+
+	tagCounts := make(map[string]int)
+	vendorCounts := make(map[string]int)
+
+	tagRows, err := d.conn.QueryContext(ctx, "SELECT tags FROM articles;")
+	if err == nil {
+		defer tagRows.Close()
+		for tagRows.Next() {
+			var rawTags string
+			if err := tagRows.Scan(&rawTags); err != nil {
+				continue
+			}
+			var tags []string
+			if err := json.Unmarshal([]byte(rawTags), &tags); err != nil {
+				continue
+			}
+
+			hasCVE := false
+			for _, t := range tags {
+				tLow := strings.ToLower(t)
+
+				if strings.HasPrefix(tLow, "cve-") {
+					hasCVE = true
+				}
+
+				if _, ok := categoryLabels[tLow]; ok {
+					tagCounts[tLow]++
+				}
+
+				if vName, ok := vendorLabels[tLow]; ok {
+					vendorCounts[vName]++
+				}
+			}
+			if hasCVE {
+				tagCounts["cve"]++
+			}
+		}
+	}
+
+	for k, label := range categoryLabels {
+		cnt := tagCounts[k]
+		if cnt > 0 {
+			data.TopTags = append(data.TopTags, TagStat{Tag: k, Label: label, Count: cnt})
+		}
+	}
+
+	for _, vName := range vendorLabels {
+		cnt := vendorCounts[vName]
+		if cnt > 0 {
+			data.TopVendors = append(data.TopVendors, VendorStat{Vendor: vName, Count: cnt})
+		}
+	}
+
+	return data, nil
+}
+
+// SaveIoCs, bir makaleyle ilişkili tespit edilen IoC'leri veritabanına ekler.
+func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, source string, iocs []model.IoC) error {
+	if len(iocs) == 0 {
+		return nil
+	}
+
+	stmt, err := d.conn.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
+		VALUES (?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare ioc insert failed: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, item := range iocs {
+		val := strings.TrimSpace(item.Value)
+		if val == "" {
+			continue
+		}
+		_, _ = stmt.ExecContext(ctx, articleID, item.Type, val, threatContext, source, now)
+	}
+	return nil
+}
+
+// GetIoCs, filtrelenebilir kriterlere göre IoC listesini ve toplam sayıyı döndürür.
+func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, int, error) {
+	var whereClauses []string
+	var args []any
+
+	if filter.Type != "" {
+		whereClauses = append(whereClauses, "i.type = ?")
+		args = append(args, strings.ToLower(strings.TrimSpace(filter.Type)))
+	}
+
+	if filter.Search != "" {
+		whereClauses = append(whereClauses, "(i.value LIKE ? OR i.threat_context LIKE ?)")
+		searchTerm := "%" + strings.TrimSpace(filter.Search) + "%"
+		args = append(args, searchTerm, searchTerm)
+	}
+
+	if filter.ArticleID > 0 {
+		whereClauses = append(whereClauses, "i.article_id = ?")
+		args = append(args, filter.ArticleID)
+	}
+
+	whereSQL := ""
+	if len(whereClauses) > 0 {
+		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	// Toplam kayıt sayısı
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs i %s;", whereSQL)
+	var totalCount int
+	if err := d.conn.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("count iocs failed: %w", err)
+	}
+
+	// Kayıtları çek (articles tablosu ile birleştirilerek haberin doğrudan URL'si de alınır)
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	query := fmt.Sprintf(`
+		SELECT 
+			i.id, 
+			i.article_id, 
+			i.type, 
+			i.value, 
+			i.threat_context, 
+			COALESCE(i.source, a.source, ''), 
+			COALESCE(a.link, ''), 
+			i.first_seen
+		FROM iocs i
+		LEFT JOIN articles a ON i.article_id = a.id
+		%s
+		ORDER BY i.first_seen DESC
+		LIMIT ? OFFSET ?;
+	`, whereSQL)
+
+	queryArgs := append(args, limit, filter.Offset)
+	rows, err := d.conn.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query iocs failed: %w", err)
+	}
+	defer rows.Close()
+
+	var iocs []model.IoC
+	for rows.Next() {
+		var item model.IoC
+		var firstSeenStr string
+		if err := rows.Scan(&item.ID, &item.ArticleID, &item.Type, &item.Value, &item.ThreatContext, &item.Source, &item.URL, &firstSeenStr); err != nil {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, firstSeenStr); err == nil {
+			item.FirstSeen = t
+		}
+		iocs = append(iocs, item)
+	}
+
+	return iocs, totalCount, nil
+}
+
+// GetIoCsForArticle, belirli bir makaleye ait IoC'leri döner.
+func (d *DB) GetIoCsForArticle(ctx context.Context, articleID int64) ([]model.IoC, error) {
+	iocs, _, err := d.GetIoCs(ctx, model.IoCFilter{ArticleID: articleID, Limit: 100})
+	return iocs, err
+}
+
+// ExportIoCs, IoC'leri TXT (blok listesi) veya CSV formatında bayt dizisi olarak döndürür.
+func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, error) {
+	filter := model.IoCFilter{
+		Type:  iocType,
+		Limit: 2000,
+	}
+	iocs, _, err := d.GetIoCs(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.ToLower(format) == "csv" {
+		var sb strings.Builder
+		sb.WriteString("Type,Value,ThreatContext,Source,URL,FirstSeen\n")
+		for _, item := range iocs {
+			cleanContext := strings.ReplaceAll(item.ThreatContext, "\"", "\"\"")
+			cleanSource := strings.ReplaceAll(item.Source, "\"", "\"\"")
+			cleanURL := strings.ReplaceAll(item.URL, "\"", "\"\"")
+			sb.WriteString(fmt.Sprintf("%s,%s,\"%s\",\"%s\",\"%s\",%s\n",
+				item.Type,
+				item.Value,
+				cleanContext,
+				cleanSource,
+				cleanURL,
+				item.FirstSeen.Format(time.RFC3339),
+			))
+		}
+		return []byte(sb.String()), nil
+	}
+
+	// Varsayılan: TXT Blok Listesi (Her satırda 1 adet saf değer)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# CTIFeed Otomatik IoC Blok Listesi - %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	sb.WriteString(fmt.Sprintf("# Toplam Kayit: %d\n\n", len(iocs)))
+	for _, item := range iocs {
+		sb.WriteString(item.Value + "\n")
+	}
+	return []byte(sb.String()), nil
+}
+
+// BackfillIoCs, veritabanında daha önce kaydedilmiş haberlerden geriye dönük IoC çıkarımı yapar.
+func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []model.IoC) (int, error) {
+	// Kural güncellemelerinde eski false-positive alan adlarını temizle
+	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs WHERE type = 'domain';")
+
+	rows, err := d.conn.QueryContext(ctx, "SELECT id, title, summary, source FROM articles;")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type articleSnippet struct {
+		id      int64
+		title   string
+		summary string
+		source  string
+	}
+
+	var articles []articleSnippet
+	for rows.Next() {
+		var a articleSnippet
+		if err := rows.Scan(&a.id, &a.title, &a.summary, &a.source); err == nil {
+			articles = append(articles, a)
+		}
+	}
+
+	totalExtracted := 0
+	for _, a := range articles {
+		combinedText := a.title + " " + a.summary
+		extracted := extractFn(combinedText)
+		if len(extracted) > 0 {
+			if err := d.SaveIoCs(ctx, a.id, a.title, a.source, extracted); err == nil {
+				totalExtracted += len(extracted)
+			}
+		}
+	}
+
+	return totalExtracted, nil
 }

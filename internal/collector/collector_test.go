@@ -25,7 +25,7 @@ func TestCollectorWithMockFeed(t *testing.T) {
     <item>
       <title>Turkish Energy Grid Targeted by Zero-Day Campaign (CVE-2024-9999)</title>
       <link>https://example.com/item-recent</link>
-      <description><![CDATA[<p>USOM reported ongoing exploits targeting Fortinet devices in Ankara.</p>]]></description>
+      <description><![CDATA[<p>USOM reported ongoing exploits targeting Fortinet devices in Ankara. C2 server identified at 194.26.29.112 and domain evil-c2[.]top.</p>]]></description>
       <pubDate>%s</pubDate>
     </item>
     <item>
@@ -89,5 +89,10 @@ func TestCollectorWithMockFeed(t *testing.T) {
 		if !found {
 			t.Errorf("expected tag %s in article tags %v", expTag, article.Tags)
 		}
+	}
+
+	// IoC çıkarımı doğrulaması
+	if len(article.IoCs) < 2 {
+		t.Errorf("expected at least 2 IoCs extracted from feed, got %d", len(article.IoCs))
 	}
 }

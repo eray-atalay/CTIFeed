@@ -17,6 +17,7 @@ import (
 	"ctifeed/internal/api"
 	"ctifeed/internal/collector"
 	"ctifeed/internal/config"
+	"ctifeed/internal/model"
 	"ctifeed/internal/notifier"
 	"ctifeed/internal/storage"
 )
@@ -43,6 +44,7 @@ func main() {
 	flag.DurationVar(&cfg.Timeout, "timeout", 10*time.Second, "Timeout per feed fetch request")
 	flag.StringVar(&cfg.DBPath, "db", "ctifeed.db", "Path to SQLite database file")
 	flag.IntVar(&cfg.TopArticles, "top", 10, "Number of top-priority articles to display in CLI report")
+	flag.DurationVar(&cfg.MaxAgeHours, "max-age", 7*24*time.Hour, "Maximum age for articles to process (e.g. 48h, 168h)")
 	flag.IntVar(&cfg.MinScore, "min-score", 0, "Minimum score filter for CLI report display")
 	flag.StringVar(&cfg.TelegramToken, "telegram-token", "", "Telegram Bot API Token")
 	verbose := flag.Bool("verbose", false, "Enable verbose debug logs")
@@ -73,6 +75,11 @@ func main() {
 	if envTimeout := os.Getenv("TIMEOUT"); envTimeout != "" {
 		if t, err := time.ParseDuration(envTimeout); err == nil {
 			cfg.Timeout = t
+		}
+	}
+	if envMaxAge := os.Getenv("MAX_AGE"); envMaxAge != "" {
+		if d, err := time.ParseDuration(envMaxAge); err == nil {
+			cfg.MaxAgeHours = d
 		}
 	}
 
@@ -248,7 +255,18 @@ func runCollectionCycle(ctx context.Context, col *collector.Collector, db *stora
 
 		// CLI modunda da yeni eklenen haberleri Telegram abonelerine ilet
 		if inserted > 0 && tgBot != nil {
-			tgBot.DispatchAlert(ctx, res.Articles[:inserted])
+			var newArticles []*model.Article
+			for _, a := range res.Articles {
+				if a.ID > 0 {
+					newArticles = append(newArticles, a)
+					if len(newArticles) >= inserted {
+						break
+					}
+				}
+			}
+			if len(newArticles) > 0 {
+				tgBot.DispatchAlert(ctx, newArticles)
+			}
 		}
 	}
 

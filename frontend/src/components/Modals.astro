@@ -137,6 +137,51 @@
   </div>
 </div>
 
+<!-- =================================================================== -->
+<!-- CVE Ozel Sayfasi (Modali) - Filtreli & Siralamali                    -->
+<!-- =================================================================== -->
+<div class="modal-overlay hidden" id="cve-view-modal" role="dialog" aria-modal="true">
+  <div class="modal-card modal-card-wide" style="max-width: 1050px; height: 85vh;">
+    <button class="modal-close" id="cve-modal-close-btn" aria-label="Kapat">&times;</button>
+    <div class="modal-header">
+      <div class="ioc-modal-header-top">
+        <div>
+          <h2>CVE Zafiyet Akışı & Telegram Bildirimleri</h2>
+          <p class="modal-sub">Telegram kanalları ve global CTI kaynaklarından toplanan tüm CVE güvenlik açıkları.</p>
+        </div>
+      </div>
+      <div class="ioc-filters-bar" style="display: flex; gap: 12px; align-items: center;">
+        <input type="text" id="cve-modal-search" class="ioc-search-input" placeholder="CVE kodu veya zafiyet adı ara (örn: CVE-2026, Fortinet, RCE)..." style="flex: 1;">
+        <div class="select-wrapper">
+          <select id="cve-sort-select" style="background: #0e1422; border: 1px solid var(--bg-card-border); color: var(--text-secondary); padding: 7px 12px; border-radius: var(--radius-md); font-size: 0.825rem; cursor: pointer;">
+            <option value="desc">En Yeni Tarih</option>
+            <option value="asc">En Eski Tarih</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="ioc-table-container" style="max-height: calc(85vh - 170px);">
+      <table class="ioc-table">
+        <thead>
+          <tr>
+            <th style="width: 150px;">CVE Kodu</th>
+            <th>Zafiyet & Tehdit Özeti</th>
+            <th style="width: 190px;">Kaynak</th>
+            <th style="width: 120px;">Yayınlanma</th>
+            <th style="width: 80px; text-align: center;">Bağlantı</th>
+          </tr>
+        </thead>
+        <tbody id="cve-table-body">
+          <!-- JS ile dinamik doldurulur -->
+        </tbody>
+      </table>
+      <div id="cve-empty-state" class="ioc-empty-state hidden">
+        <p>Arama kriterine uygun CVE kaydı bulunamadı.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Alt Bilgi (Footer) -->
 <footer class="app-footer">
   <p>CTIFeed Siber Tehdit Radari - Go &amp; Astro Mimarisi</p>

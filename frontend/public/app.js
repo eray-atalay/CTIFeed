@@ -8,6 +8,7 @@
     source: '',
     minScore: 0,
     sortBy: 'score',
+    timeRange: '',
     articles: [],
     sources: [],
     stats: null,
@@ -36,6 +37,14 @@
     sourceSelect: document.getElementById('source-select'),
     scoreSelect: document.getElementById('score-select'),
     sortSelect: document.getElementById('sort-select'),
+    timeSelect: document.getElementById('time-select'),
+    btnCveView: document.getElementById('btn-cve-view'),
+    cveModal: document.getElementById('cve-view-modal'),
+    cveModalCloseBtn: document.getElementById('cve-modal-close-btn'),
+    cveTableBody: document.getElementById('cve-table-body'),
+    cveEmptyState: document.getElementById('cve-empty-state'),
+    cveModalSearch: document.getElementById('cve-modal-search'),
+    cveSortSelect: document.getElementById('cve-sort-select'),
     articlesGrid: document.getElementById('articles-grid'),
     feedCount: document.getElementById('feed-count'),
     lastUpdatedText: document.getElementById('last-updated-text'),
@@ -139,15 +148,19 @@
       if (state.source) params.set('source', state.source);
       if (state.minScore > 0) params.set('min_score', state.minScore);
       if (state.sortBy) params.set('sort', state.sortBy);
-      params.set('limit', '60');
+      if (state.timeRange) params.set('time_range', state.timeRange);
+      params.set('limit', '100');
 
       const res = await fetch(`/api/articles?${params.toString()}`);
       if (!res.ok) throw new Error('Haberler getirilemedi');
       const data = await res.json();
-      state.articles = data.articles || [];
-      renderArticles(state.articles);
-      el.feedCount.textContent = `${data.total || 0} oge`;
-      el.lastUpdatedText.textContent = `Son Guncelleme: ${new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+      
+      // Telegram kaynakli maddeleri ana dashboard'dan filtreliyoruz
+      const dashboardArticles = (data.articles || []).filter(a => !a.source.startsWith('Telegram:'));
+      
+      state.articles = dashboardArticles;
+      renderArticles(state.articles, dashboardArticles.length);
+      updateFilterSummary();
     } catch (err) {
       console.error('Haberler yuklenirken hata:', err);
       el.articlesGrid.innerHTML = `
@@ -161,14 +174,85 @@
     }
   }
 
+  // CVE Ozel Sayfasi / Tablosu Veri Cekici (Siralama ve Arama Destekli)
+  async function loadCVEPage() {
+    if (!el.cveTableBody) return;
+    try {
+      const searchQuery = el.cveModalSearch ? el.cveModalSearch.value.trim() : '';
+      const sortOrder = el.cveSortSelect ? el.cveSortSelect.value : 'desc';
+
+      const params = new URLSearchParams();
+      params.set('limit', '250');
+      params.set('sort', 'date');
+
+      const res = await fetch(`/api/articles?${params.toString()}`);
+      if (!res.ok) throw new Error('CVE haberleri alinamadi');
+      const data = await res.json();
+
+      let articles = (data.articles || []).filter(a => {
+        const isTelegram = a.source && a.source.startsWith('Telegram:');
+        const hasCveTag = (a.tags || []).some(t => t.toUpperCase().startsWith('CVE-'));
+        const hasCveText = (a.title && a.title.toUpperCase().includes('CVE-')) || 
+                           (a.summary && a.summary.toUpperCase().includes('CVE-'));
+        return isTelegram || hasCveTag || hasCveText;
+      });
+
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        articles = articles.filter(a => 
+          (a.title && a.title.toLowerCase().includes(q)) || 
+          (a.summary && a.summary.toLowerCase().includes(q)) ||
+          (a.tags && a.tags.some(t => t.toLowerCase().includes(q)))
+        );
+      }
+
+      // Tarihe gore siralama (En yeni / En eski)
+      articles.sort((a, b) => {
+        const dateA = new Date(a.published_at).getTime();
+        const dateB = new Date(b.published_at).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      });
+
+      if (!articles || articles.length === 0) {
+        el.cveTableBody.innerHTML = '';
+        if (el.cveEmptyState) el.cveEmptyState.classList.remove('hidden');
+        return;
+      }
+
+      if (el.cveEmptyState) el.cveEmptyState.classList.add('hidden');
+      el.cveTableBody.innerHTML = articles.map(art => {
+        const cveTags = (art.tags || []).filter(t => t.toUpperCase().startsWith('CVE-'));
+        const cveLabel = cveTags.length > 0 ? cveTags.join(', ') : 'CVE Bildirimi';
+        const timeAgo = formatTimeAgo(art.published_at) || '-';
+
+        return `
+          <tr>
+            <td><span class="tag-item tag-cve" style="font-size:0.8rem;">${escapeHtml(cveLabel)}</span></td>
+            <td>
+              <div style="font-weight: 600; color: #fff; margin-bottom: 4px;">${escapeHtml(art.title)}</div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4;">${escapeHtml(art.summary || '')}</div>
+            </td>
+            <td><span class="ioc-source-tag">${escapeHtml(art.source)}</span></td>
+            <td style="color: var(--text-muted); font-size: 0.8rem;">${timeAgo}</td>
+            <td style="text-align: center;">
+              <a href="${escapeHtml(art.link)}" target="_blank" rel="noopener noreferrer" class="btn-link">Rapor &rarr;</a>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } catch (err) {
+      console.error('CVE listesi yuklenirken hata:', err);
+    }
+  }
+
   async function triggerScan() {
     if (state.isScanning) return;
     state.isScanning = true;
-    const count = state.sources.length || 22;
+    const count = state.sources.length || 24;
     el.btnScanNow.classList.add('scanning');
     el.scanBtnText.textContent = `${count} Kaynak Taraniyor...`;
     el.scanBanner.classList.remove('hidden');
-    el.scanBannerText.textContent = `${count} CTI kaynagina baglaniliyor, beslemeler ayristiriliyor ve puanlaniyor...`;
+    el.scanBannerText.textContent = `${count} CTI ve Telegram kaynagina baglaniliyor, beslemeler ayristiriliyor...`;
 
     try {
       const res = await fetch('/api/scan', { method: 'POST' });
@@ -180,10 +264,12 @@
         el.scanBanner.classList.add('hidden');
       }, 5000);
 
-      // Verileri guncelle
       await fetchStats();
       await fetchAnalytics();
       await fetchArticles();
+      if (el.cveModal && !el.cveModal.classList.contains('hidden')) {
+        await loadCVEPage();
+      }
     } catch (err) {
       console.error('Tarama hatasi:', err);
       el.scanBannerText.textContent = `Tarama hatasi: ${err.message}`;
@@ -236,11 +322,9 @@
   function drawAnalyticsCharts(data) {
     if (!data || typeof Chart === 'undefined') return;
 
-    // Chart.js Global Tema Ayarlari
     Chart.defaults.color = '#94a3b8';
     Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
-    // 1. Tehdit Turu Dagilimi (Doughnut Chart)
     if (el.chartTags && data.top_tags && data.top_tags.length > 0) {
       if (state.chartTagsInstance) {
         state.chartTagsInstance.destroy();
@@ -276,28 +360,11 @@
                 padding: 10,
               },
             },
-            tooltip: {
-              backgroundColor: '#152033',
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              borderWidth: 1,
-              titleFont: { size: 12, weight: 'bold' },
-              bodyFont: { size: 12 },
-              padding: 10,
-              callbacks: {
-                label: function (ctx) {
-                  const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
-                  const val = ctx.parsed;
-                  const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
-                  return ` ${ctx.label}: ${val} (%${pct})`;
-                }
-              }
-            },
           },
         },
       });
     }
 
-    // 2. En Cok Hedeflenen Ureticiler (Horizontal Bar Chart)
     if (el.chartVendors && data.top_vendors && data.top_vendors.length > 0) {
       if (state.chartVendorsInstance) {
         state.chartVendorsInstance.destroy();
@@ -314,22 +381,13 @@
             borderColor: '#00f2fe',
             borderWidth: 1.5,
             borderRadius: 4,
-            hoverBackgroundColor: 'rgba(0, 242, 254, 0.85)',
           }],
         },
         options: {
           indexAxis: 'y',
           responsive: true,
           maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: '#152033',
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              borderWidth: 1,
-              padding: 10,
-            },
-          },
+          plugins: { legend: { display: false } },
           scales: {
             x: {
               grid: { color: 'rgba(255, 255, 255, 0.04)' },
@@ -344,7 +402,6 @@
       });
     }
 
-    // 3. Aktivite Nabzi (Timeline Area Chart)
     if (el.chartTimeline && data.timeline && data.timeline.length > 0) {
       if (state.chartTimelineInstance) {
         state.chartTimelineInstance.destroy();
@@ -367,8 +424,6 @@
               tension: 0.35,
               borderWidth: 2,
               pointBackgroundColor: '#00f2fe',
-              pointRadius: 4,
-              pointHoverRadius: 6,
             },
             {
               label: 'Kritik Alarmlar (50+)',
@@ -379,8 +434,6 @@
               tension: 0.35,
               borderWidth: 2,
               pointBackgroundColor: '#ff3366',
-              pointRadius: 4,
-              pointHoverRadius: 6,
             },
           ],
         },
@@ -398,14 +451,7 @@
                 pointStyle: 'circle',
                 font: { size: 11 },
                 color: '#cbd5e1',
-                padding: 14,
               },
-            },
-            tooltip: {
-              backgroundColor: '#152033',
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              borderWidth: 1,
-              padding: 10,
             },
           },
           scales: {
@@ -449,6 +495,7 @@
   }
 
   function populateSourcesDropdown(sources) {
+    if (!el.sourceSelect) return;
     el.sourceSelect.innerHTML = '<option value="">Tum Kaynaklar</option>';
     sources.forEach(src => {
       const opt = document.createElement('option');
@@ -459,19 +506,18 @@
   }
 
   function renderArticles(articles, totalCount) {
-    el.feedCount.textContent = `${totalCount} oge`;
-    el.lastUpdatedText.textContent = `Son guncelleme: ${new Date().toLocaleTimeString('tr-TR')}`;
+    if (el.feedCount) el.feedCount.textContent = `${totalCount} oge`;
+    if (el.lastUpdatedText) el.lastUpdatedText.textContent = `Son guncelleme: ${new Date().toLocaleTimeString('tr-TR')}`;
 
     if (!articles || articles.length === 0) {
       el.articlesGrid.innerHTML = '';
-      el.emptyState.classList.remove('hidden');
+      if (el.emptyState) el.emptyState.classList.remove('hidden');
       return;
     }
 
-    el.emptyState.classList.add('hidden');
+    if (el.emptyState) el.emptyState.classList.add('hidden');
     el.articlesGrid.innerHTML = articles.map(article => createArticleCardHTML(article)).join('');
 
-    // Tiklama olaylarini bagla
     el.articlesGrid.querySelectorAll('.article-card').forEach(card => {
       const articleId = parseInt(card.dataset.id, 10);
       const article = articles.find(a => a.id === articleId);
@@ -484,7 +530,6 @@
       });
     });
 
-    // Kart ici etiket filtre tiklamalari
     el.articlesGrid.querySelectorAll('.tag-item').forEach(tagBtn => {
       tagBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -502,9 +547,11 @@
     const tagsHTML = (article.tags || []).map(t => {
       const isCVE = t.toUpperCase().startsWith('CVE-');
       const isTR = t === 'TR-Focus';
+      const isExploit = t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation';
       let tagClass = 'tag-item';
       if (isCVE) tagClass += ' tag-cve';
       if (isTR) tagClass += ' tag-tr';
+      if (isExploit) tagClass += ' tag-exploit';
       return `<button class="${tagClass}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`;
     }).join('');
 
@@ -567,20 +614,26 @@
   }
 
   function setLoading(loading) {
+    if (!el.loadingGrid) return;
     if (loading) {
       el.loadingGrid.classList.remove('hidden');
-      el.emptyState.classList.add('hidden');
+      if (el.emptyState) el.emptyState.classList.add('hidden');
     } else {
       el.loadingGrid.classList.add('hidden');
     }
   }
 
   function updateFilterSummary() {
+    if (!el.activeFilterBar) return;
     const filters = [];
     if (state.search) filters.push(`Arama: "${state.search}"`);
     if (state.tag) filters.push(`Etiket: [${state.tag}]`);
     if (state.source) filters.push(`Kaynak: ${state.source}`);
     if (state.minScore > 0) filters.push(`Min Skor: ${state.minScore}+`);
+    if (state.timeRange) {
+      const timeNames = { today: 'Bugun', '1w': 'Son 1 Hafta', '2w': 'Son 2 Hafta' };
+      filters.push(`Zaman: ${timeNames[state.timeRange] || state.timeRange}`);
+    }
 
     if (filters.length > 0) {
       el.filterSummaryText.textContent = filters.join(' - ');
@@ -592,17 +645,17 @@
 
   function selectTag(tag) {
     state.tag = tag;
-    el.tagPills.querySelectorAll('.pill').forEach(pill => {
-      if (pill.dataset.tag === tag) {
-        pill.classList.add('active');
-      } else {
-        pill.classList.remove('active');
-      }
-    });
+    if (el.tagPills) {
+      el.tagPills.querySelectorAll('.pill').forEach(pill => {
+        if (pill.dataset.tag === tag) {
+          pill.classList.add('active');
+        } else {
+          pill.classList.remove('active');
+        }
+      });
+    }
     fetchArticles();
   }
-
-  // --- Modal Mantigi ---
 
   function openArticleModal(article) {
     if (!article) return;
@@ -616,9 +669,7 @@
     el.modalSummaryText.textContent = article.summary || 'Bu kayit icin ozet metin bulunmuyor.';
     el.modalLinkBtn.href = article.link;
 
-    // Skor Dagilimi
     const breakdownHTML = [];
-
     if (article.tags && article.tags.includes('TR-Focus')) {
       breakdownHTML.push(`
         <div class="breakdown-item">
@@ -638,7 +689,12 @@
       `);
     }
 
-    const prodKeywords = ['fortinet', 'cisco', 'wordpress', 'vmware', 'palo-alto', 'microsoft-exchange', 'active-directory', 'ivanti'];
+    const prodKeywords = [
+      'fortinet', 'cisco', 'wordpress', 'vmware', 'palo-alto', 'microsoft-exchange', 
+      'active-directory', 'ivanti', 'citrix', 'sonicwall', 'check-point', 'f5', 
+      'juniper', 'veeam', 'moveit', 'goanywhere', 'atlassian', 'sharepoint', 
+      'outlook', 'entra-id', 'openssh', 'kubernetes', 'linux'
+    ];
     const matchedProds = (article.tags || []).filter(t => prodKeywords.includes(t));
     if (matchedProds.length > 0) {
       breakdownHTML.push(`
@@ -649,7 +705,22 @@
       `);
     }
 
-    const threatVecs = ['zero-day', 'rce', 'ransomware', 'data-breach', 'leak', 'apt'];
+    const exploitKeywords = ['in-the-wild', 'poc', 'active-exploitation'];
+    const matchedExploits = (article.tags || []).filter(t => exploitKeywords.includes(t));
+    if (matchedExploits.length > 0) {
+      breakdownHTML.push(`
+        <div class="breakdown-item">
+          <span>Aktif Somuru / PoC Tespit Edildi (${matchedExploits.join(', ')})</span>
+          <span class="breakdown-badge" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">+25 PUAN</span>
+        </div>
+      `);
+    }
+
+    const threatVecs = [
+      'zero-day', 'rce', 'ransomware', 'data-breach', 'leak', 'apt', 
+      'auth-bypass', 'privilege-escalation', 'pre-auth', 'infostealer', 
+      'wiper', 'spyware', 'c2', 'supply-chain', 'ssrf', 'sqli'
+    ];
     const matchedThreats = (article.tags || []).filter(t => threatVecs.includes(t));
     if (matchedThreats.length > 0) {
       breakdownHTML.push(`
@@ -663,7 +734,7 @@
     if (breakdownHTML.length === 0) {
       breakdownHTML.push(`
         <div class="breakdown-item">
-          <span>Standart Tehdit Bulteni (Kritik tetikleyici kelime eslesmedi)</span>
+          <span>Standart Tehdit Bulteni</span>
           <span class="breakdown-badge">+0 PUAN</span>
         </div>
       `);
@@ -671,11 +742,16 @@
 
     el.modalBreakdown.innerHTML = breakdownHTML.join('');
 
-    // NIST NVD Baglantili CVE Etiketleri
     if (article.tags && article.tags.length > 0) {
       el.modalTags.innerHTML = article.tags.map(t => {
         if (t.toUpperCase().startsWith('CVE-')) {
           return `<a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(t)}" target="_blank" rel="noopener noreferrer" class="tag-item tag-cve" title="NIST NVD uzerinde incele">[CVE] ${escapeHtml(t)}</a>`;
+        }
+        if (t === 'TR-Focus') {
+          return `<span class="tag-item tag-tr">${escapeHtml(t)}</span>`;
+        }
+        if (t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation') {
+          return `<span class="tag-item tag-exploit">${escapeHtml(t)}</span>`;
         }
         return `<span class="tag-item">${escapeHtml(t)}</span>`;
       }).join('');
@@ -683,7 +759,6 @@
       el.modalTags.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Etiket atanmadi</span>';
     }
 
-    // Makaleye Ait Tehdit Göstergeleri (IoC)
     if (el.modalIocsWrap && el.modalIocsList) {
       el.modalIocsList.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">Tehdit gostergeleri taranıyor...</span>';
       el.modalIocsWrap.classList.remove('hidden');
@@ -744,8 +819,6 @@
     el.sourcesModal.classList.add('hidden');
   }
 
-  // --- IoC Havuzu Yonetimi ---
-
   async function fetchIoCCounts() {
     try {
       const res = await fetch('/api/iocs?limit=1000');
@@ -787,7 +860,6 @@
 
   function renderIoCTable(iocs) {
     if (!el.iocTableBody) return;
-
     if (!iocs || iocs.length === 0) {
       el.iocTableBody.innerHTML = '';
       if (el.iocEmptyState) el.iocEmptyState.classList.remove('hidden');
@@ -803,13 +875,8 @@
       if (threatContext) {
         if (ioc.url) {
           contextDisplay = `
-            <a href="${escapeHtml(ioc.url)}" target="_blank" rel="noopener noreferrer" class="ioc-news-link" title="Haberi yeni sekmede aç: ${escapeHtml(threatContext)}">
+            <a href="${escapeHtml(ioc.url)}" target="_blank" rel="noopener noreferrer" class="ioc-news-link">
               <span>${escapeHtml(threatContext)}</span>
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
             </a>
           `;
         } else {
@@ -819,23 +886,10 @@
 
       let sourceDisplay = '<span style="color: var(--text-muted);">-</span>';
       if (ioc.source) {
-        if (ioc.url) {
-          sourceDisplay = `
-            <a href="${escapeHtml(ioc.url)}" target="_blank" rel="noopener noreferrer" class="ioc-source-tag ioc-source-link" title="Orijinal Haber Kaynağına Git: ${escapeHtml(ioc.source)}">
-              <span>${escapeHtml(ioc.source)}</span>
-              <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
-            </a>
-          `;
-        } else {
-          sourceDisplay = `<span class="ioc-source-tag">${escapeHtml(ioc.source)}</span>`;
-        }
+        sourceDisplay = `<span class="ioc-source-tag">${escapeHtml(ioc.source)}</span>`;
       }
 
-      const timeDisplay = formatTimeAgo(ioc.first_seen || ioc.created_at) || ((ioc.first_seen || ioc.created_at) ? (ioc.first_seen || ioc.created_at).slice(0, 10) : '-');
+      const timeDisplay = formatTimeAgo(ioc.first_seen || ioc.created_at) || '-';
 
       return `
         <tr>
@@ -846,10 +900,6 @@
           <td style="color: var(--text-muted); font-size: 0.8rem;">${timeDisplay}</td>
           <td style="text-align: center;">
             <button class="btn-copy-ioc" data-val="${escapeHtml(ioc.value)}" title="Panoya Kopyala">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
               <span>Kopyala</span>
             </button>
           </td>
@@ -867,8 +917,6 @@
   function closeIocsModal() {
     if (el.iocsModal) el.iocsModal.classList.add('hidden');
   }
-
-  // --- Yardimci Fonksiyonlar ---
 
   function formatTimeAgo(dateString) {
     if (!dateString) return '';
@@ -903,9 +951,9 @@
     searchTimeout = setTimeout(() => {
       state.search = query.trim();
       if (state.search) {
-        el.searchClearBtn.classList.remove('hidden');
+        if (el.searchClearBtn) el.searchClearBtn.classList.remove('hidden');
       } else {
-        el.searchClearBtn.classList.add('hidden');
+        if (el.searchClearBtn) el.searchClearBtn.classList.add('hidden');
       }
       fetchArticles();
     }, 300);
@@ -916,59 +964,122 @@
     state.tag = '';
     state.source = '';
     state.minScore = 0;
-    el.searchInput.value = '';
-    el.searchClearBtn.classList.add('hidden');
-    el.sourceSelect.value = '';
-    el.scoreSelect.value = '0';
-    el.sortSelect.value = 'score';
-    el.tagPills.querySelectorAll('.pill').forEach((p, idx) => {
-      if (idx === 0) p.classList.add('active');
-      else p.classList.remove('active');
-    });
+    state.timeRange = '';
+
+    if (el.searchInput) el.searchInput.value = '';
+    if (el.searchClearBtn) el.searchClearBtn.classList.add('hidden');
+    if (el.sourceSelect) el.sourceSelect.value = '';
+    if (el.scoreSelect) el.scoreSelect.value = '0';
+    if (el.sortSelect) el.sortSelect.value = 'score';
+    if (el.timeSelect) el.timeSelect.value = '';
+
+    if (el.tagPills) {
+      el.tagPills.querySelectorAll('.pill').forEach((p, idx) => {
+        if (idx === 0) p.classList.add('active');
+        else p.classList.remove('active');
+      });
+    }
     fetchArticles();
   }
 
   // --- Olay Dinleyicileri ---
 
   function initListeners() {
-    el.searchInput.addEventListener('input', (e) => debounceSearch(e.target.value));
-    el.searchClearBtn.addEventListener('click', () => {
-      el.searchInput.value = '';
-      debounceSearch('');
-    });
-
-    el.tagPills.querySelectorAll('.pill').forEach(pill => {
-      pill.addEventListener('click', () => {
-        selectTag(pill.dataset.tag);
+    if (el.searchInput) {
+      el.searchInput.addEventListener('input', (e) => debounceSearch(e.target.value));
+    }
+    if (el.searchClearBtn) {
+      el.searchClearBtn.addEventListener('click', () => {
+        el.searchInput.value = '';
+        debounceSearch('');
       });
-    });
+    }
 
-    el.sourceSelect.addEventListener('change', (e) => {
-      state.source = e.target.value;
-      fetchArticles();
-    });
+    if (el.tagPills) {
+      el.tagPills.querySelectorAll('.pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          selectTag(pill.dataset.tag);
+        });
+      });
+    }
 
-    el.scoreSelect.addEventListener('change', (e) => {
-      state.minScore = parseInt(e.target.value, 10) || 0;
-      fetchArticles();
-    });
+    if (el.sourceSelect) {
+      el.sourceSelect.addEventListener('change', (e) => {
+        state.source = e.target.value;
+        fetchArticles();
+      });
+    }
 
-    el.sortSelect.addEventListener('change', (e) => {
-      state.sortBy = e.target.value;
-      fetchArticles();
-    });
+    if (el.scoreSelect) {
+      el.scoreSelect.addEventListener('change', (e) => {
+        state.minScore = parseInt(e.target.value, 10) || 0;
+        fetchArticles();
+      });
+    }
 
-    el.btnResetFilters.addEventListener('click', resetAllFilters);
-    el.btnEmptyReset.addEventListener('click', resetAllFilters);
-    el.btnScanNow.addEventListener('click', triggerScan);
+    if (el.sortSelect) {
+      el.sortSelect.addEventListener('change', (e) => {
+        state.sortBy = e.target.value;
+        fetchArticles();
+      });
+    }
 
-    el.btnSources.addEventListener('click', openSourcesModal);
-    el.sourcesCloseBtn.addEventListener('click', closeSourcesModal);
-    el.sourcesModal.addEventListener('click', (e) => {
-      if (e.target === el.sourcesModal) closeSourcesModal();
-    });
+    // Ana Tablo Zaman Filtresi
+    if (el.timeSelect) {
+      el.timeSelect.addEventListener('change', (e) => {
+        state.timeRange = e.target.value;
+        fetchArticles();
+      });
+    }
 
-    // IoC Modali Olaylari
+    // CVE Ozel Sayfasi / Modali Olay Dinleyicileri
+    if (el.btnCveView) {
+      el.btnCveView.addEventListener('click', () => {
+        loadCVEPage();
+        if (el.cveModal) el.cveModal.classList.remove('hidden');
+      });
+    }
+
+    if (el.cveModalCloseBtn) {
+      el.cveModalCloseBtn.addEventListener('click', () => {
+        if (el.cveModal) el.cveModal.classList.add('hidden');
+      });
+    }
+
+    if (el.cveModal) {
+      el.cveModal.addEventListener('click', (e) => {
+        if (e.target === el.cveModal) el.cveModal.classList.add('hidden');
+      });
+    }
+
+    if (el.cveSortSelect) {
+      el.cveSortSelect.addEventListener('change', () => {
+        loadCVEPage();
+      });
+    }
+
+    if (el.cveModalSearch) {
+      let cveTimeout = null;
+      el.cveModalSearch.addEventListener('input', (e) => {
+        clearTimeout(cveTimeout);
+        cveTimeout = setTimeout(() => {
+          loadCVEPage();
+        }, 300);
+      });
+    }
+
+    if (el.btnResetFilters) el.btnResetFilters.addEventListener('click', resetAllFilters);
+    if (el.btnEmptyReset) el.btnEmptyReset.addEventListener('click', resetAllFilters);
+    if (el.btnScanNow) el.btnScanNow.addEventListener('click', triggerScan);
+
+    if (el.btnSources) el.btnSources.addEventListener('click', openSourcesModal);
+    if (el.sourcesCloseBtn) el.sourcesCloseBtn.addEventListener('click', closeSourcesModal);
+    if (el.sourcesModal) {
+      el.sourcesModal.addEventListener('click', (e) => {
+        if (e.target === el.sourcesModal) closeSourcesModal();
+      });
+    }
+
     if (el.btnIocs) el.btnIocs.addEventListener('click', openIocsModal);
     if (el.iocsCloseBtn) el.iocsCloseBtn.addEventListener('click', closeIocsModal);
     if (el.iocsModal) {
@@ -988,8 +1099,8 @@
       });
     }
 
-    let iocSearchTimeout = null;
     if (el.iocSearchInput) {
+      let iocSearchTimeout = null;
       el.iocSearchInput.addEventListener('input', (e) => {
         clearTimeout(iocSearchTimeout);
         iocSearchTimeout = setTimeout(() => {
@@ -999,7 +1110,6 @@
       });
     }
 
-    // Genel Panoya Kopyalama Butonlari Dinleyicisi
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.btn-copy-ioc');
       if (btn) {
@@ -1021,21 +1131,23 @@
       }
     });
 
-    el.modalCloseBtn.addEventListener('click', closeArticleModal);
-    el.modalCloseFooter.addEventListener('click', closeArticleModal);
-    el.articleModal.addEventListener('click', (e) => {
-      if (e.target === el.articleModal) closeArticleModal();
-    });
+    if (el.modalCloseBtn) el.modalCloseBtn.addEventListener('click', closeArticleModal);
+    if (el.modalCloseFooter) el.modalCloseFooter.addEventListener('click', closeArticleModal);
+    if (el.articleModal) {
+      el.articleModal.addEventListener('click', (e) => {
+        if (e.target === el.articleModal) closeArticleModal();
+      });
+    }
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeArticleModal();
         closeSourcesModal();
         closeIocsModal();
+        if (el.cveModal) el.cveModal.classList.add('hidden');
       }
     });
 
-    // Analitik Panelini Gizle / Goster
     if (el.btnToggleAnalytics && el.analyticsChartsContainer) {
       if (state.analyticsCollapsed) {
         el.analyticsChartsContainer.classList.add('collapsed');

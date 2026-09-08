@@ -23,8 +23,11 @@
       <button class="pill active" data-tag="">Tum Beslemeler</button>
       <button class="pill pill-tr" data-tag="TR-Focus">TR-Focus (+50)</button>
       <button class="pill pill-alert" data-tag="zero-day">Zero-Day</button>
+      <button class="pill pill-exploit" data-tag="in-the-wild">In-The-Wild (+25)</button>
       <button class="pill pill-ransom" data-tag="ransomware">Ransomware</button>
       <button class="pill pill-rce" data-tag="rce">RCE</button>
+      <button class="pill" data-tag="auth-bypass">Auth Bypass</button>
+      <button class="pill" data-tag="infostealer">Infostealer</button>
       <button class="pill" data-tag="wordpress">WordPress</button>
       <button class="pill" data-tag="fortinet">Fortinet</button>
       <button class="pill" data-tag="cisco">Cisco</button>
@@ -34,6 +37,15 @@
     </div>
 
     <div class="filter-dropdowns">
+      <div class="select-wrapper">
+        <select id="time-select" aria-label="Zaman Araligina Gore Filtrele">
+          <option value="">Tum Zamanlar</option>
+          <option value="today">Bugun (Son 24 Saat)</option>
+          <option value="1w">Son 1 Hafta</option>
+          <option value="2w">Son 2 Hafta</option>
+        </select>
+      </div>
+
       <div class="select-wrapper">
         <select id="source-select" aria-label="Kaynaga Gore Filtrele">
           <option value="">Tum Kaynaklar</option>

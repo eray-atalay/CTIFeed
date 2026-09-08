@@ -72,11 +72,11 @@ func (d *DB) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at DESC);`,
 
 		`CREATE TABLE IF NOT EXISTS user_subscriptions (
-            chat_id INTEGER NOT NULL,
-            tag TEXT NOT NULL,
-            created_at DATETIME NOT NULL,
-            PRIMARY KEY (chat_id, tag)
-        );`,
+			chat_id INTEGER NOT NULL,
+			tag TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (chat_id, tag)
+		);`,
 		`CREATE INDEX IF NOT EXISTS idx_subscriptions_tag ON user_subscriptions(tag);`,
 
 		`CREATE TABLE IF NOT EXISTS iocs (
@@ -154,7 +154,7 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 	return false, nil
 }
 
-// SaveArticles, bir dizi haberi tek bir işlem içinde kaydeder.
+// SaveArticles, bir dizi haberi tek bir transaction içinde kaydeder.
 func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, int, error) {
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -304,7 +304,107 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 	return articles, nil
 }
 
-// ArticleFilter, haber filtreleme parametrelerini tanımlar.
+// GetArticlesByTag, geriye dönük uyumluluk için son 48 saatteki haberleri getirir.
+func (d *DB) GetArticlesByTag(ctx context.Context, tag string, limit int) ([]*model.Article, error) {
+	return d.GetArticlesByTagAndTime(ctx, tag, time.Now().Add(-48*time.Hour), limit)
+}
+
+// GetArticlesByTagAndTime, belirli bir kategori ve zaman aralığına göre haberleri getirir.
+func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time.Time, limit int) ([]*model.Article, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	var query string
+	var args []any
+
+	cleanTag := strings.ToLower(strings.TrimSpace(tag))
+	sinceStr := since.UTC().Format(time.RFC3339)
+
+	switch cleanTag {
+	case "critical":
+		query = `
+			SELECT id, source, title, link, summary, score, tags, published_at, created_at
+			FROM articles 
+			WHERE score >= 50 AND published_at >= ?
+			ORDER BY score DESC, published_at DESC 
+			LIMIT ?;
+		`
+		args = []any{sinceStr, limit}
+	case "tr-focus":
+		query = `
+			SELECT id, source, title, link, summary, score, tags, published_at, created_at
+			FROM articles 
+			WHERE (LOWER(tags) LIKE '%tr-focus%' OR LOWER(source) LIKE '%usom%') AND published_at >= ?
+			ORDER BY score DESC, published_at DESC 
+			LIMIT ?;
+		`
+		args = []any{sinceStr, limit}
+	case "cve":
+		query = `
+			SELECT id, source, title, link, summary, score, tags, published_at, created_at
+			FROM articles 
+			WHERE (LOWER(tags) LIKE '%cve-%' OR LOWER(title) LIKE '%cve-%') AND published_at >= ?
+			ORDER BY score DESC, published_at DESC 
+			LIMIT ?;
+		`
+		args = []any{sinceStr, limit}
+	default:
+		query = `
+			SELECT id, source, title, link, summary, score, tags, published_at, created_at
+			FROM articles 
+			WHERE (LOWER(tags) LIKE ? OR LOWER(title) LIKE ?) AND published_at >= ?
+			ORDER BY score DESC, published_at DESC 
+			LIMIT ?;
+		`
+		pattern := "%" + cleanTag + "%"
+		args = []any{pattern, pattern, sinceStr, limit}
+	}
+
+	rows, err := d.conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query articles failed: %w", err)
+	}
+	defer rows.Close()
+
+	var articles []*model.Article
+	for rows.Next() {
+		var a model.Article
+		var tagsJSON string
+		var pubStr, createdStr string
+
+		if err := rows.Scan(
+			&a.ID,
+			&a.Source,
+			&a.Title,
+			&a.Link,
+			&a.Summary,
+			&a.Score,
+			&tagsJSON,
+			&pubStr,
+			&createdStr,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan article row: %w", err)
+		}
+
+		if err := json.Unmarshal([]byte(tagsJSON), &a.Tags); err != nil {
+			a.Tags = []string{}
+		}
+
+		if t, err := time.Parse(time.RFC3339, pubStr); err == nil {
+			a.PublishedAt = t
+		}
+		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
+			a.CreatedAt = t
+		}
+
+		articles = append(articles, &a)
+	}
+
+	return articles, nil
+}
+
+// ArticleFilter, haber arama ve filtreleme parametrelerini tanımlar.
 type ArticleFilter struct {
 	Search    string
 	Tag       string
@@ -459,24 +559,24 @@ func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 	return s, nil
 }
 
-// ToggleSubscription, kullanıcının seçtiği etiketi açar veya kapatır.
+// ToggleSubscription, kullanıcının seçtiği kategoriyi tam eşleşmeyle açar veya kapatır.
 func (d *DB) ToggleSubscription(ctx context.Context, chatID int64, tag string) (bool, error) {
-	tag = strings.ToLower(strings.TrimSpace(tag))
+	tag = strings.TrimSpace(tag)
 
 	var exists int
-	err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_subscriptions WHERE chat_id = ? AND tag = ?", chatID, tag).Scan(&exists)
+	err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_subscriptions WHERE chat_id = ? AND LOWER(tag) = LOWER(?)", chatID, tag).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("abonelik kontrol hatasi: %w", err)
 	}
 
 	if exists > 0 {
-		_, err := d.conn.ExecContext(ctx, "DELETE FROM user_subscriptions WHERE chat_id = ? AND tag = ?", chatID, tag)
+		_, err := d.conn.ExecContext(ctx, "DELETE FROM user_subscriptions WHERE chat_id = ? AND LOWER(tag) = LOWER(?)", chatID, tag)
 		return false, err
 	}
 
 	_, err = d.conn.ExecContext(ctx,
 		"INSERT INTO user_subscriptions (chat_id, tag, created_at) VALUES (?, ?, ?)",
-		chatID, tag, time.Now().UTC().Format(time.RFC3339),
+		chatID, strings.ToLower(tag), time.Now().UTC().Format(time.RFC3339),
 	)
 	return true, err
 }
@@ -493,13 +593,36 @@ func (d *DB) GetUserSubscriptions(ctx context.Context, chatID int64) ([]string, 
 	for rows.Next() {
 		var tag string
 		if err := rows.Scan(&tag); err == nil {
-			tags = append(tags, tag)
+			cleanTag := strings.ToLower(strings.TrimSpace(tag))
+			if cleanTag != "" {
+				tags = append(tags, cleanTag)
+			}
 		}
 	}
 	return tags, nil
 }
 
-// GetSubscribersForTags, ilgili etiketlere abone olan chat_id'leri döner.
+// GetAllSubscribers, tüm kullanıcıların izlediği etiketleri bir harita olarak döner.
+func (d *DB) GetAllSubscribers(ctx context.Context) (map[int64][]string, error) {
+	rows, err := d.conn.QueryContext(ctx, "SELECT chat_id, tag FROM user_subscriptions")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all subscribers: %w", err)
+	}
+	defer rows.Close()
+
+	subscribers := make(map[int64][]string)
+	for rows.Next() {
+		var chatID int64
+		var tag string
+		if err := rows.Scan(&chatID, &tag); err == nil {
+			subscribers[chatID] = append(subscribers[chatID], tag)
+		}
+	}
+
+	return subscribers, nil
+}
+
+// GetSubscribersForTags, gelen haberin etiketlerine abone olan kişilerin chat_id'lerini döner.
 func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64, error) {
 	if len(tags) == 0 {
 		return nil, nil
@@ -621,9 +744,12 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		"cve":          "CVE Zafiyetleri",
 		"tr-focus":     "TR-Focus (USOM/TR)",
 		"zero-day":     "Zero-Day",
+		"in-the-wild":  "Aktif İstismar (In-the-Wild)",
 		"ransomware":   "Ransomware",
 		"rce":          "RCE İstismarı",
+		"auth-bypass":  "Yetki Atlama (Auth Bypass)",
 		"data-breach":  "Veri Sızıntısı",
+		"infostealer":  "Veri Hırsızı (Infostealer)",
 		"phishing":     "Oltalama (Phishing)",
 		"malware":      "Zararlı Yazılım",
 		"supply-chain": "Tedarik Zinciri",
@@ -635,6 +761,10 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		"cisco":     "Cisco",
 		"vmware":    "VMware",
 		"wordpress": "WordPress",
+		"citrix":    "Citrix",
+		"sonicwall": "SonicWall",
+		"atlassian": "Atlassian",
+		"veeam":     "Veeam",
 		"linux":     "Linux",
 		"apache":    "Apache",
 		"ivanti":    "Ivanti",

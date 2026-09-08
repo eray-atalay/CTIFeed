@@ -5,11 +5,11 @@
 # ------------------------------------------------------------------------------
 # Asama 1: Astro On Yuzunun Derlenmesi
 # ------------------------------------------------------------------------------
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 # Bagimliliklari yukle
-COPY frontend/package.json ./
+COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 
 # Astro statik uretim varliklarini olustur
@@ -31,8 +31,8 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY web/ ./web/
 
-# Yeni derlenen Astro statik varliklarini web dizinine aktar
-COPY --from=frontend-builder /app/frontend/dist/ ./web/
+# Yeni derlenen Astro statik varliklarini web/dist dizinine aktar
+COPY --from=frontend-builder /app/frontend/dist/ ./web/dist/
 
 # Bagimsiz statik Go ikili dosyasini derle (CGO gerektirmez)
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/ctifeed ./cmd/ctifeed

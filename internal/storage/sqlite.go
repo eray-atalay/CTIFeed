@@ -26,8 +26,7 @@ func NewDB(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	// Eşzamanlılık ve güvenilirlik için bağlantı havuzunu ve pragma kurallarını ayarla
-	conn.SetMaxOpenConns(1) // SQLite tek yazıcı bağlantısıyla en kararlı şekilde çalışır
+	conn.SetMaxOpenConns(1)
 	conn.SetConnMaxLifetime(time.Hour)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -72,7 +71,6 @@ func (d *DB) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_articles_score ON articles(score DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at DESC);`,
 
-		// migrate fonksiyonundaki queries diliminin içine ekle:
 		`CREATE TABLE IF NOT EXISTS user_subscriptions (
             chat_id INTEGER NOT NULL,
             tag TEXT NOT NULL,
@@ -81,7 +79,6 @@ func (d *DB) migrate(ctx context.Context) error {
         );`,
 		`CREATE INDEX IF NOT EXISTS idx_subscriptions_tag ON user_subscriptions(tag);`,
 
-		// IoC (Tehdit Göstergeleri) Tablosu ve İndeksleri
 		`CREATE TABLE IF NOT EXISTS iocs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			article_id INTEGER NOT NULL,
@@ -108,7 +105,6 @@ func (d *DB) migrate(ctx context.Context) error {
 }
 
 // SaveArticle, haber kaydını henüz mevcut değilse veritabanına ekler.
-// Yeni eklendiyse (inserted = true, nil), mükerrer ise (inserted = false, nil) döndürür.
 func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, error) {
 	tagsJSON, err := json.Marshal(article.Tags)
 	if err != nil {
@@ -158,7 +154,7 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 	return false, nil
 }
 
-// SaveArticles, bir dizi haberi tek bir işlem (transaction) içinde kaydeder; eklenen ve atlanan sayıları döner.
+// SaveArticles, bir dizi haberi tek bir işlem içinde kaydeder.
 func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, int, error) {
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -223,13 +219,11 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 			}
 		} else {
 			skipped++
-			// Makale zaten mevcutsa ID'sini çek ki tespit edilen IoC'ler bağlanabilsin
 			if a.ID <= 0 {
 				_ = tx.QueryRowContext(ctx, "SELECT id FROM articles WHERE link = ?", a.Link).Scan(&a.ID)
 			}
 		}
 
-		// Makaleye ait tespit edilmiş IoC'leri kaydet
 		if a.ID > 0 && len(a.IoCs) > 0 {
 			nowStr := now.Format(time.RFC3339)
 			for _, item := range a.IoCs {
@@ -249,7 +243,7 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 	return inserted, skipped, nil
 }
 
-// GetTopArticles, isteğe bağlı minimum puan ve limit kısıtlamalarıyla en yüksek puanlı haberleri sorgular.
+// GetTopArticles, en yüksek puanlı haberleri sorgular.
 func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*model.Article, error) {
 	if limit <= 0 {
 		limit = 10
@@ -258,7 +252,7 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 	query := `
 		SELECT id, source, title, link, summary, score, tags, published_at, created_at
 		FROM articles
-		WHERE score >= ?
+		WHERE score >= ? AND source NOT LIKE 'Telegram:%'
 		ORDER BY score DESC, published_at DESC
 		LIMIT ?;
 	`
@@ -310,25 +304,25 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 	return articles, nil
 }
 
-// ArticleFilter, haber arama ve filtreleme parametrelerini tanımlar.
+// ArticleFilter, haber filtreleme parametrelerini tanımlar.
 type ArticleFilter struct {
-	Search   string
-	Tag      string
-	Source   string
-	MinScore int
-	Limit    int
-	Offset   int
-	SortBy   string
+	Search    string
+	Tag       string
+	Source    string
+	MinScore  int
+	Limit     int
+	Offset    int
+	SortBy    string
 	TimeRange string
 }
 
-// QueryArticles, verilen kriterlere göre haberleri filtreler ve eşleşen listeyle toplam kayıt sayısını döner.
+// QueryArticles, verilen kriterlere göre haberleri filtreler.
 func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.Article, int, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = 20
 	}
-	if filter.Limit > 200 {
-		filter.Limit = 200
+	if filter.Limit > 300 {
+		filter.Limit = 300
 	}
 	if filter.Offset < 0 {
 		filter.Offset = 0
@@ -338,14 +332,14 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 	var args []any
 
 	if filter.TimeRange != "" {
-    switch filter.TimeRange {
-    case "today":
-        whereClauses = append(whereClauses, "published_at >= datetime('now', '-1 day')")
-    case "1w":
-        whereClauses = append(whereClauses, "published_at >= datetime('now', '-7 days')")
-    case "2w":
-        whereClauses = append(whereClauses, "published_at >= datetime('now', '-14 days')")
-    	}
+		switch filter.TimeRange {
+		case "today":
+			whereClauses = append(whereClauses, "published_at >= datetime('now', '-1 day')")
+		case "1w":
+			whereClauses = append(whereClauses, "published_at >= datetime('now', '-7 days')")
+		case "1m":
+			whereClauses = append(whereClauses, "published_at >= datetime('now', '-30 days')")
+		}
 	}
 	if filter.MinScore > 0 {
 		whereClauses = append(whereClauses, "score >= ?")
@@ -370,20 +364,17 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 
 	whereSQL := strings.Join(whereClauses, " AND ")
 
-	// 1. Kriterlere uyan toplam kayıt sayısını al
 	countQuery := "SELECT COUNT(*) FROM articles WHERE " + whereSQL
 	var totalCount int
 	if err := d.conn.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("count query failed: %w", err)
 	}
 
-	// 2. Sıralama düzenini belirle
 	orderBy := "score DESC, published_at DESC"
 	if filter.SortBy == "date" {
 		orderBy = "published_at DESC, score DESC"
 	}
 
-	// 3. Sayfalanmış sonuçları sorgula
 	query := fmt.Sprintf(`
 		SELECT id, source, title, link, summary, score, tags, published_at, created_at
 		FROM articles
@@ -443,12 +434,12 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 // Stats, toplanan haberlerin istatistik özetini barındırır.
 type Stats struct {
 	TotalArticles           int `json:"total_articles"`
-	HighPriorityCount       int `json:"high_priority_count"`      // Puan >= 50 olanlar
-	CriticalVulnerabilities int `json:"critical_vulnerabilities"` // CVE içeren etiketler
-	TRFocusCount            int `json:"tr_focus_count"`           // TR-Focus etiketli olanlar
+	HighPriorityCount       int `json:"high_priority_count"`
+	CriticalVulnerabilities int `json:"critical_vulnerabilities"`
+	TRFocusCount            int `json:"tr_focus_count"`
 }
 
-// GetStats, toplanan haberler hakkında istatistiksel özetleri döndürür.
+// GetStats, Telegram kanallarını hariç tutarak ana istatistikleri döner.
 func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 	var s Stats
 	row := d.conn.QueryRowContext(ctx, `
@@ -457,7 +448,8 @@ func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 			COALESCE(SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN tags LIKE '%CVE-%' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN tags LIKE '%TR-Focus%' THEN 1 ELSE 0 END), 0)
-		FROM articles;
+		FROM articles
+		WHERE source NOT LIKE 'Telegram:%';
 	`)
 
 	if err := row.Scan(&s.TotalArticles, &s.HighPriorityCount, &s.CriticalVulnerabilities, &s.TRFocusCount); err != nil {
@@ -507,7 +499,7 @@ func (d *DB) GetUserSubscriptions(ctx context.Context, chatID int64) ([]string, 
 	return tags, nil
 }
 
-// GetSubscribersForTags, gelen haberin etiketlerine abone olan kişilerin chat_id'lerini döner.
+// GetSubscribersForTags, ilgili etiketlere abone olan chat_id'leri döner.
 func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64, error) {
 	if len(tags) == 0 {
 		return nil, nil
@@ -549,7 +541,7 @@ type TagStat struct {
 	Count int    `json:"count"`
 }
 
-// VendorStat, hedeflenen üretici/teknoloji istatistiğini tutar.
+// VendorStat, hedeflenen üretici istatistiğini tutar.
 type VendorStat struct {
 	Vendor string `json:"vendor"`
 	Count  int    `json:"count"`
@@ -571,7 +563,7 @@ type AnalyticsData struct {
 	AverageScore float64        `json:"average_score"`
 }
 
-// GetAnalytics, grafikler için kategorize edilmiş analitik verilerini toplar.
+// GetAnalytics, grafikler için Telegram hariç tutulmuş analitik verilerini toplar.
 func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 	data := &AnalyticsData{
 		TopTags:     make([]TagStat, 0),
@@ -580,13 +572,14 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		SourceShare: make([]TagStat, 0),
 	}
 
-	// 1. Ortalama Skor
-	_ = d.conn.QueryRowContext(ctx, "SELECT COALESCE(AVG(score), 0) FROM articles;").Scan(&data.AverageScore)
+	// 1. Ortalama Skor (Telegram Hariç)
+	_ = d.conn.QueryRowContext(ctx, "SELECT COALESCE(AVG(score), 0) FROM articles WHERE source NOT LIKE 'Telegram:%';").Scan(&data.AverageScore)
 
-	// 2. Kaynak Dağılımı (Top 8)
+	// 2. Kaynak Dağılımı (Top 8, Telegram Hariç)
 	srcRows, err := d.conn.QueryContext(ctx, `
 		SELECT source, COUNT(*) as cnt 
 		FROM articles 
+		WHERE source NOT LIKE 'Telegram:%'
 		GROUP BY source 
 		ORDER BY cnt DESC 
 		LIMIT 8;
@@ -602,14 +595,14 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		}
 	}
 
-	// 3. Son 7 Günün Aktivite Zaman Çizelgesi
+	// 3. Son 7 Günün Aktivite Zaman Çizelgesi (Telegram Hariç)
 	timeRows, err := d.conn.QueryContext(ctx, `
 		SELECT 
 			strftime('%Y-%m-%d', published_at) AS day,
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END), 0) AS critical
 		FROM articles
-		WHERE published_at >= datetime('now', '-7 days')
+		WHERE source NOT LIKE 'Telegram:%' AND published_at >= datetime('now', '-7 days')
 		GROUP BY day
 		ORDER BY day ASC;
 	`)
@@ -623,7 +616,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		}
 	}
 
-	// 4. Tehdit Kategorileri ve Hedeflenen Teknolojiler
+	// 4. Tehdit Kategorileri ve Hedeflenen Teknolojiler (Telegram Hariç)
 	categoryLabels := map[string]string{
 		"cve":          "CVE Zafiyetleri",
 		"tr-focus":     "TR-Focus (USOM/TR)",
@@ -653,7 +646,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 	tagCounts := make(map[string]int)
 	vendorCounts := make(map[string]int)
 
-	tagRows, err := d.conn.QueryContext(ctx, "SELECT tags FROM articles;")
+	tagRows, err := d.conn.QueryContext(ctx, "SELECT tags FROM articles WHERE source NOT LIKE 'Telegram:%';")
 	if err == nil {
 		defer tagRows.Close()
 		for tagRows.Next() {
@@ -705,7 +698,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 	return data, nil
 }
 
-// SaveIoCs, bir makaleyle ilişkili tespit edilen IoC'leri veritabanına ekler.
+// SaveIoCs, bir makaleyle ilişkili tespit edilen IoC'leri kaydeder.
 func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, source string, iocs []model.IoC) error {
 	if len(iocs) == 0 {
 		return nil
@@ -731,7 +724,7 @@ func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, sourc
 	return nil
 }
 
-// GetIoCs, filtrelenebilir kriterlere göre IoC listesini ve toplam sayıyı döndürür.
+// GetIoCs, filtrelenebilir kriterlere göre IoC listesini döndürür.
 func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, int, error) {
 	var whereClauses []string
 	var args []any
@@ -757,14 +750,12 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	// Toplam kayıt sayısı
 	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs i %s;", whereSQL)
 	var totalCount int
 	if err := d.conn.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("count iocs failed: %w", err)
 	}
 
-	// Kayıtları çek (articles tablosu ile birleştirilerek haberin doğrudan URL'si de alınır)
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -816,7 +807,7 @@ func (d *DB) GetIoCsForArticle(ctx context.Context, articleID int64) ([]model.Io
 	return iocs, err
 }
 
-// ExportIoCs, IoC'leri TXT (blok listesi) veya CSV formatında bayt dizisi olarak döndürür.
+// ExportIoCs, IoC'leri TXT veya CSV formatında döndürür.
 func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, error) {
 	filter := model.IoCFilter{
 		Type:  iocType,
@@ -846,7 +837,6 @@ func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, er
 		return []byte(sb.String()), nil
 	}
 
-	// Varsayılan: TXT Blok Listesi (Her satırda 1 adet saf değer)
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# CTIFeed Otomatik IoC Blok Listesi - %s\n", time.Now().Format("2006-01-02 15:04:05")))
 	sb.WriteString(fmt.Sprintf("# Toplam Kayit: %d\n\n", len(iocs)))
@@ -858,7 +848,6 @@ func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, er
 
 // BackfillIoCs, veritabanında daha önce kaydedilmiş haberlerden geriye dönük IoC çıkarımı yapar.
 func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []model.IoC) (int, error) {
-	// Kural güncellemelerinde eski false-positive alan adlarını temizle
 	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs WHERE type = 'domain';")
 
 	rows, err := d.conn.QueryContext(ctx, "SELECT id, title, summary, source FROM articles;")
@@ -895,5 +884,3 @@ func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []mod
 
 	return totalExtracted, nil
 }
-
-

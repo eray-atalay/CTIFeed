@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"html"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -184,12 +185,27 @@ func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, res
 	}
 }
 
-// fetchTelegramFeed, t.me/s/<channel> sayfasindan mesajlari ceker ve Article nesnelerine donusturur.
+// fetchTelegramFeed, Telegram kanallarından mesajları çeker.
 func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
-	ctx, cancel := context.WithTimeout(parentCtx, c.cfg.Timeout)
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
-	channelName := strings.TrimPrefix(src.URL, "telegram://")
+	channelURL := src.URL
+	channelName := strings.TrimPrefix(channelURL, "telegram://")
+
+	// Eğer özel son ID parametresi varsa (Örn: breachdetect?latest=1281687)
+	if strings.Contains(channelName, "?latest=") {
+		parts := strings.Split(channelName, "?latest=")
+		ch := parts[0]
+		var latestID int
+		_, _ = fmt.Sscanf(parts[1], "%d", &latestID)
+
+		if latestID > 0 {
+			return c.fetchTelegramByID(ctx, src, ch, latestID)
+		}
+	}
+
+	// Standart herkese açık kanallar (cveNotify gibi t.me/s/...)
 	channelName = strings.TrimPrefix(channelName, "https://t.me/s/")
 	channelName = strings.TrimPrefix(channelName, "http://t.me/s/")
 	targetURL := fmt.Sprintf("https://t.me/s/%s", channelName)
@@ -206,7 +222,7 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, 0, fmt.Errorf("telegram status code: %d", resp.StatusCode)
+		return nil, 0, fmt.Errorf("telegram status: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -215,9 +231,7 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 	}
 
 	htmlContent := string(body)
-
-	// Regex ile mesaj, tarih ve tekil post linki tespiti
-	msgRegex := regexp.MustCompile(`(?s)<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>`)
+	msgRegex := regexp.MustCompile(`(?s)<div class="[^"]*tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>`)
 	linkRegex := regexp.MustCompile(`data-post="([^"]+)"`)
 	timeRegex := regexp.MustCompile(`<time datetime="([^"]+)"`)
 
@@ -236,13 +250,11 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 			continue
 		}
 
-		// Post Linki
 		link := fmt.Sprintf("https://t.me/%s/%d", channelName, i)
 		if i < len(postLinks) {
 			link = "https://t.me/" + postLinks[i][1]
 		}
 
-		// Yayin Tarihi
 		pubDate := time.Now().UTC()
 		if i < len(times) {
 			if parsedT, err := time.Parse(time.RFC3339, times[i][1]); err == nil {
@@ -255,24 +267,22 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 			continue
 		}
 
-		// Ilk satirdan baslik cikarma
 		lines := strings.Split(cleanSummary, "\n")
 		cleanTitle := strings.TrimSpace(lines[0])
 		if len(cleanTitle) > 120 {
 			cleanTitle = cleanTitle[:117] + "..."
 		}
 		if cleanTitle == "" {
-			cleanTitle = fmt.Sprintf("[%s] Yeni Tehdit Bildirimi", src.Name)
+			cleanTitle = fmt.Sprintf("[%s] Yeni Tehdit", src.Name)
 		}
 
-		// IoC ve Puanlama
 		extractedIoCs := ioc.Extract(cleanSummary)
 		scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
 
 		articles = append(articles, &model.Article{
 			Source:      src.Name,
 			Title:       cleanTitle,
-			Link:        link, // Link UNIQUE oldugu icin SQLite mukerrerleri otomatik eler!
+			Link:        link,
 			Summary:     cleanSummary,
 			Score:       scoringResult.Score,
 			Tags:        scoringResult.Tags,
@@ -283,6 +293,115 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 	}
 
 	return articles, oldCnt, nil
+}
+
+// fetchTelegramByID, web önizlemesi kapalı kanalları meta etiketlerinden geriye dönük çeker.
+// fetchTelegramByID, web önizlemesi kapalı kanalları meta etiketlerinden paralel çeker.
+func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource, channel string, latestID int) ([]*model.Article, int, error) {
+	descRegex := regexp.MustCompile(`<meta property="og:description" content="([^"]+)"`)
+	contentRegex := regexp.MustCompile(`(?i)"Content":\s*"([^"]+)"`)
+	dateRegex := regexp.MustCompile(`(?i)"Detection Date":\s*"([^"]+)"`)
+
+	totalPosts := 20
+	type postResult struct {
+		article *model.Article
+	}
+
+	resChan := make(chan postResult, totalPosts)
+	var wg sync.WaitGroup
+
+	// İstekleri sıralı değil, eşzamanlı (paralel) gönderiyoruz:
+	for i := 0; i < totalPosts; i++ {
+		postID := latestID - i
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			postURL := fmt.Sprintf("https://t.me/%s/%d", channel, id)
+			req, err := http.NewRequestWithContext(ctx, "GET", postURL, nil)
+			if err != nil {
+				return
+			}
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+			resp, err := c.httpClient.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				return
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return
+			}
+
+			m := descRegex.FindStringSubmatch(string(body))
+			if len(m) < 2 {
+				return
+			}
+
+			rawText := html.UnescapeString(m[1])
+			rawText = strings.TrimSpace(rawText)
+			if strings.HasPrefix(rawText, "You can view and join") || len(rawText) < 15 {
+				return
+			}
+
+			title := ""
+			if cSub := contentRegex.FindStringSubmatch(rawText); len(cSub) > 1 {
+				title = cSub[1]
+			}
+			if title == "" {
+				lines := strings.Split(rawText, "\n")
+				title = strings.TrimSpace(lines[0])
+			}
+			if len(title) > 120 {
+				title = title[:117] + "..."
+			}
+
+			pubDate := time.Now().UTC()
+			if dSub := dateRegex.FindStringSubmatch(rawText); len(dSub) > 1 {
+				if t, err := time.Parse("02 Jan 2006", strings.TrimSpace(dSub[1])); err == nil {
+					pubDate = t.UTC()
+				}
+			}
+
+			extractedIoCs := ioc.Extract(rawText)
+			scoringResult := scorer.Evaluate(title, rawText)
+
+			tags := scoringResult.Tags
+			tags = append(tags, "data-breach", "leak")
+
+			resChan <- postResult{
+				article: &model.Article{
+					Source:      src.Name,
+					Title:       title,
+					Link:        postURL,
+					Summary:     rawText,
+					Score:       scoringResult.Score,
+					Tags:        tags,
+					PublishedAt: pubDate,
+					CreatedAt:   time.Now().UTC(),
+					IoCs:        extractedIoCs,
+				},
+			}
+		}(postID)
+	}
+
+	wg.Wait()
+	close(resChan)
+
+	var articles []*model.Article
+	for r := range resChan {
+		if r.article != nil {
+			articles = append(articles, r.article)
+		}
+	}
+
+	return articles, 0, nil
 }
 
 // fetchFeed, standart RSS/Atom beslemelerini ceker.

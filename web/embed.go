@@ -2,7 +2,7 @@ package web
 
 import "embed"
 
-// Assets, gömülü statik web dosyalarını (index.html, style.css, app.js, global.css) içerir.
+// Assets, Astro tarafından web/dist klasörüne derlenen statik varlıkları içerir.
 //
-//go:embed index.html style.css app.js global.css
+//go:embed dist/*
 var Assets embed.FS

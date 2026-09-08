@@ -5,11 +5,13 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "astro build && node -e \"const fs=require('fs'); fs.mkdirSync('../web/dist', {recursive: true}); fs.cpSync('./dist', '../web/dist', {recursive: true})\"",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
-    "astro": "^4.16.18"
+    "@astrojs/preact": "^3.5.3",
+    "astro": "^4.16.18",
+    "preact": "^10.29.8"
   }
 }

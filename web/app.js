@@ -27,6 +27,22 @@
 
   // DOM Ogeleri
   const el = {
+    btnBreachView: document.getElementById('btn-breach-view'),
+    breachModal: document.getElementById('breach-view-modal'),
+    breachModalCloseBtn: document.getElementById('breach-modal-close-btn'),
+    breachTableBody: document.getElementById('breach-table-body'),
+    breachEmptyState: document.getElementById('breach-empty-state'),
+    breachModalSearch: document.getElementById('breach-modal-search'),
+    breachSortSelect: document.getElementById('breach-sort-select'),
+    breachCountBadge: document.getElementById('breach-count-badge'),
+    btnCveView: document.getElementById('btn-cve-view'),
+    cveModal: document.getElementById('cve-view-modal'),
+    cveModalCloseBtn: document.getElementById('cve-modal-close-btn'),
+    cveTableBody: document.getElementById('cve-table-body'),
+    cveEmptyState: document.getElementById('cve-empty-state'),
+    cveModalSearch: document.getElementById('cve-modal-search'),
+    cveSortSelect: document.getElementById('cve-sort-select'),
+    cveCountBadge: document.getElementById('cve-count-badge'),
     statTotal: document.getElementById('stat-total'),
     statCritical: document.getElementById('stat-critical'),
     statCve: document.getElementById('stat-cve'),
@@ -38,13 +54,6 @@
     scoreSelect: document.getElementById('score-select'),
     sortSelect: document.getElementById('sort-select'),
     timeSelect: document.getElementById('time-select'),
-    btnCveView: document.getElementById('btn-cve-view'),
-    cveModal: document.getElementById('cve-view-modal'),
-    cveModalCloseBtn: document.getElementById('cve-modal-close-btn'),
-    cveTableBody: document.getElementById('cve-table-body'),
-    cveEmptyState: document.getElementById('cve-empty-state'),
-    cveModalSearch: document.getElementById('cve-modal-search'),
-    cveSortSelect: document.getElementById('cve-sort-select'),
     articlesGrid: document.getElementById('articles-grid'),
     feedCount: document.getElementById('feed-count'),
     lastUpdatedText: document.getElementById('last-updated-text'),
@@ -174,7 +183,7 @@
     }
   }
 
-  // CVE Ozel Sayfasi / Tablosu Veri Cekici (Siralama ve Arama Destekli)
+  // CVE Ozel Sayfasi / Tablosu Veri Cekici
   async function loadCVEPage() {
     if (!el.cveTableBody) return;
     try {
@@ -206,7 +215,11 @@
         );
       }
 
-      // Tarihe gore siralama (En yeni / En eski)
+      // Canli CVE sayisini badge icine yaz
+      if (el.cveCountBadge) {
+        el.cveCountBadge.textContent = `${articles.length} zafiyet`;
+      }
+
       articles.sort((a, b) => {
         const dateA = new Date(a.published_at).getTime();
         const dateB = new Date(b.published_at).getTime();
@@ -245,6 +258,74 @@
     }
   }
 
+  // Sizinti Radari Veri Cekici
+  async function loadBreachPage() {
+    if (!el.breachTableBody) return;
+    try {
+      const searchQuery = el.breachModalSearch ? el.breachModalSearch.value.trim() : '';
+      const sortOrder = el.breachSortSelect ? el.breachSortSelect.value : 'desc';
+
+      const params = new URLSearchParams();
+      params.set('limit', '250');
+      params.set('sort', 'date');
+
+      const res = await fetch(`/api/articles?${params.toString()}`);
+      if (!res.ok) throw new Error('Sızıntı haberleri alınamadı');
+      const data = await res.json();
+
+      let articles = (data.articles || []).filter(a => {
+        const src = (a.source || '').toLowerCase();
+        return src.includes('breachdetect');
+      });
+
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        articles = articles.filter(a =>
+          (a.title && a.title.toLowerCase().includes(q)) ||
+          (a.summary && a.summary.toLowerCase().includes(q))
+        );
+      }
+
+      // Canli sizinti sayisini badge icine yaz
+      if (el.breachCountBadge) {
+        el.breachCountBadge.textContent = `${articles.length} sızıntı`;
+      }
+
+      articles.sort((a, b) => {
+        const dateA = new Date(a.published_at).getTime();
+        const dateB = new Date(b.published_at).getTime();
+        return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      });
+
+      if (!articles || articles.length === 0) {
+        el.breachTableBody.innerHTML = '';
+        if (el.breachEmptyState) el.breachEmptyState.classList.remove('hidden');
+        return;
+      }
+
+      if (el.breachEmptyState) el.breachEmptyState.classList.add('hidden');
+      el.breachTableBody.innerHTML = articles.map(art => {
+        const timeAgo = formatTimeAgo(art.published_at) || '-';
+        return `
+          <tr>
+            <td><span class="tag-item tag-tr" style="font-size:0.75rem;">VERİ SIZINTISI</span></td>
+            <td>
+              <div style="font-weight: 600; color: #fff; margin-bottom: 4px;">${escapeHtml(art.title)}</div>
+              <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4;">${escapeHtml(art.summary || '')}</div>
+            </td>
+            <td><span class="ioc-source-tag">${escapeHtml(art.source)}</span></td>
+            <td style="color: var(--text-muted); font-size: 0.8rem;">${timeAgo}</td>
+            <td style="text-align: center;">
+              <a href="${escapeHtml(art.link)}" target="_blank" rel="noopener noreferrer" class="btn-link">Kanal &rarr;</a>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } catch (err) {
+      console.error('Sızıntı listesi yüklenirken hata:', err);
+    }
+  }
+
   async function triggerScan() {
     if (state.isScanning) return;
     state.isScanning = true;
@@ -269,6 +350,9 @@
       await fetchArticles();
       if (el.cveModal && !el.cveModal.classList.contains('hidden')) {
         await loadCVEPage();
+      }
+      if (el.breachModal && !el.breachModal.classList.contains('hidden')) {
+        await loadBreachPage();
       }
     } catch (err) {
       console.error('Tarama hatasi:', err);
@@ -629,7 +713,7 @@
     if (state.source) filters.push(`Kaynak: ${state.source}`);
     if (state.minScore > 0) filters.push(`Min Skor: ${state.minScore}+`);
     if (state.timeRange) {
-      const timeNames = { today: 'Bugun', '1w': 'Son 1 Hafta', '2w': 'Son 2 Hafta' };
+      const timeNames = { today: 'Bugun', '1w': 'Son 1 Hafta', '1m': 'Son 1 Ay' };
       filters.push(`Zaman: ${timeNames[state.timeRange] || state.timeRange}`);
     }
 
@@ -957,6 +1041,43 @@
   // --- Olay Dinleyicileri ---
 
   function initListeners() {
+    // Breach Olay Dinleyicileri
+    if (el.btnBreachView) {
+      el.btnBreachView.addEventListener('click', () => {
+        loadBreachPage();
+        if (el.breachModal) el.breachModal.classList.remove('hidden');
+      });
+    }
+
+    if (el.breachModalCloseBtn) {
+      el.breachModalCloseBtn.addEventListener('click', () => {
+        if (el.breachModal) el.breachModal.classList.add('hidden');
+      });
+    }
+
+    if (el.breachModal) {
+      el.breachModal.addEventListener('click', (e) => {
+        if (e.target === el.breachModal) el.breachModal.classList.add('hidden');
+      });
+    }
+
+    if (el.breachSortSelect) {
+      el.breachSortSelect.addEventListener('change', () => {
+        loadBreachPage();
+      });
+    }
+
+    if (el.breachModalSearch) {
+      let breachTimeout = null;
+      el.breachModalSearch.addEventListener('input', (e) => {
+        clearTimeout(breachTimeout);
+        breachTimeout = setTimeout(() => {
+          loadBreachPage();
+        }, 300);
+      });
+    }
+
+    // Arama ve filtre dinleyicileri
     if (el.searchInput) {
       el.searchInput.addEventListener('input', (e) => debounceSearch(e.target.value));
     }
@@ -996,7 +1117,7 @@
       });
     }
 
-    // Ana Tablo Zaman Filtresi
+    // Zaman filtresi (Bugün, 1 Hafta, 1 Ay)
     if (el.timeSelect) {
       el.timeSelect.addEventListener('change', (e) => {
         state.timeRange = e.target.value;
@@ -1004,7 +1125,7 @@
       });
     }
 
-    // CVE Ozel Sayfasi / Modali Olay Dinleyicileri
+    // CVE Modali Dinleyicileri
     if (el.btnCveView) {
       el.btnCveView.addEventListener('click', () => {
         loadCVEPage();
@@ -1116,6 +1237,7 @@
         closeArticleModal();
         closeSourcesModal();
         closeIocsModal();
+        if (el.breachModal) el.breachModal.classList.add('hidden');
         if (el.cveModal) el.cveModal.classList.add('hidden');
       }
     });

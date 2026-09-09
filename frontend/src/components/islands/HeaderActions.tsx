@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { openModal, triggerGlobalRefresh, refreshTrigger } from '../../services/store';
 import { fetchSources, triggerScan } from '../../services/api';
 
@@ -6,6 +6,8 @@ export default function HeaderActions() {
   const [sourceCount, setSourceCount] = useState<number>(0);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
+  const [isRadarDropdownOpen, setIsRadarDropdownOpen] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const loadSources = async () => {
     try {
@@ -22,6 +24,21 @@ export default function HeaderActions() {
       loadSources();
     });
   }, []);
+
+  // Açılır menü dışına tıklandığında menüyü kapat
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsRadarDropdownOpen(false);
+      }
+    };
+    if (isRadarDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isRadarDropdownOpen]);
 
   const handleScan = async () => {
     if (isScanning) return;
@@ -45,46 +62,128 @@ export default function HeaderActions() {
   return (
     <>
       <div class="header-actions">
-        {/* CVE Özel Radarı Butonu */}
-        <button
-          class="btn-secondary"
-          title="Telegram ve CTI Kaynaklı CVE Zafiyetleri"
-          onClick={() => openModal('cve')}
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-          <span>CVE Radarı</span>
-        </button>
+        {/* 1. Radarlar Açılır Menüsü (Dropdown) */}
+        <div class="dropdown-wrapper" ref={dropdownRef}>
+          <button
+            class={`btn-secondary ${isRadarDropdownOpen ? 'active' : ''}`}
+            title="Özel Tehdit Radarları ve Alarmlar"
+            onClick={() => setIsRadarDropdownOpen(!isRadarDropdownOpen)}
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 3v9l6 6"></path>
+              <circle cx="12" cy="12" r="3" fill="currentColor"></circle>
+            </svg>
+            <span>Radarlar</span>
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style={{
+                transition: 'transform 0.2s ease',
+                transform: isRadarDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              }}
+            >
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
 
-        {/* Telegram Bot Yönlendirme Butonu */}
-        <a
-          href="https://t.me/ctifeed_radar_bot"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="btn-secondary btn-telegram"
-          title="Telegram Bildirim Botunu Aç"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
-          </svg>
-          <span>@ctifeed_radar_bot</span>
-        </a>
+          {isRadarDropdownOpen && (
+            <div class="radar-dropdown-menu">
+              {/* CVE Zafiyet Radarı */}
+              <button
+                class="radar-dropdown-item"
+                onClick={() => {
+                  setIsRadarDropdownOpen(false);
+                  openModal('cve');
+                }}
+              >
+                <div class="dropdown-item-icon cve-icon">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                </div>
+                <div class="dropdown-item-info">
+                  <div class="dropdown-item-title">
+                    <span>CVE Zafiyet Radarı</span>
+                    <span class="badge-mini badge-rose">CVE-2026</span>
+                  </div>
+                  <div class="dropdown-item-desc">Kritik zafiyet akışı & bildirimler</div>
+                </div>
+              </button>
 
-        {/* IoC Havuzu Butonu */}
+              {/* Data Leak Radarı */}
+              <button
+                class="radar-dropdown-item"
+                onClick={() => {
+                  setIsRadarDropdownOpen(false);
+                  openModal('breach');
+                }}
+              >
+                <div class="dropdown-item-icon breach-icon">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                  </svg>
+                </div>
+                <div class="dropdown-item-info">
+                  <div class="dropdown-item-title">
+                    <span>Data Leak Radarı</span>
+                    <span class="badge-mini badge-amber">BreachDetect</span>
+                  </div>
+                  <div class="dropdown-item-desc">Kurumsal veri sızıntıları ve vakalar</div>
+                </div>
+              </button>
+
+              <div class="radar-dropdown-divider"></div>
+
+              {/* Telegram Alarm Botu Bağlantısı */}
+              <a
+                href="https://t.me/ctifeed_radar_bot"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="radar-dropdown-item"
+                onClick={() => setIsRadarDropdownOpen(false)}
+              >
+                <div class="dropdown-item-icon telegram-icon">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+                  </svg>
+                </div>
+                <div class="dropdown-item-info">
+                  <div class="dropdown-item-title">
+                    <span>Telegram Alarm Botu</span>
+                    <span class="badge-mini badge-cyan">@ctifeed_radar_bot</span>
+                  </div>
+                  <div class="dropdown-item-desc">Anlık alarmlar ve abone kanalı ↗</div>
+                </div>
+              </a>
+            </div>
+          )}
+        </div>
+
+        {/* 2. IoC Havuzu Butonu */}
         <button
           class="btn-secondary"
           title="Tehdit Göstergeleri (IoC) Havuzu & Dışa Aktarım"
           onClick={() => openModal('ioc')}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="22" y1="12" x2="18" y2="12"></line>
+            <line x1="6" y1="12" x2="2" y2="12"></line>
+            <line x1="12" y1="6" x2="12" y2="2"></line>
+            <line x1="12" y1="22" x2="12" y2="18"></line>
           </svg>
           <span>IoC Havuzu</span>
         </button>
 
-        {/* Aktif Kaynaklar Butonu */}
+        {/* 3. Aktif Kaynaklar Butonu */}
         <button
           class="btn-secondary"
           title="Aktif Tehdit İstihbarat Kaynakları"
@@ -99,7 +198,7 @@ export default function HeaderActions() {
           <span class="badge">{sourceCount || '24'}</span>
         </button>
 
-        {/* Canlı Tarama Tetikleme Butonu */}
+        {/* 4. Canlı Tarama Tetikleme Butonu (Birincil Eylem) */}
         <button
           class={`btn-primary ${isScanning ? 'scanning' : ''}`}
           title="Tüm Kaynakları Yeniden Tara"

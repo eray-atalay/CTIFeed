@@ -437,6 +437,8 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 			whereClauses = append(whereClauses, "published_at >= datetime('now', '-1 day')")
 		case "1w":
 			whereClauses = append(whereClauses, "published_at >= datetime('now', '-7 days')")
+		case "2w":
+			whereClauses = append(whereClauses, "published_at >= datetime('now', '-14 days')")
 		case "1m":
 			whereClauses = append(whereClauses, "published_at >= datetime('now', '-30 days')")
 		}

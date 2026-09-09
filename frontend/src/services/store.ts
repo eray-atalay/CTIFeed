@@ -1,7 +1,7 @@
 // Merkezi Reaktif Store & Event Bus - Astro Adaları Arası İletişim
 import type { Article } from '../types/cti';
 
-export type ModalType = 'article' | 'cve' | 'ioc' | 'sources' | null;
+export type ModalType = 'article' | 'cve' | 'ioc' | 'sources' | 'breach' | null;
 
 type Listener<T> = (val: T) => void;
 

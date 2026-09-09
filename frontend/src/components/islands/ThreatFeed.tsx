@@ -128,7 +128,7 @@ export default function ThreatFeed() {
     if (selectedSource) list.push(`Kaynak: ${selectedSource}`);
     if (minScore > 0) list.push(`Min Skor: ${minScore}+`);
     if (timeRange) {
-      const timeNames: Record<string, string> = { today: 'Bugün', '1w': 'Son 1 Hafta', '2w': 'Son 2 Hafta' };
+      const timeNames: Record<string, string> = { today: 'Bugün', '1w': 'Son 1 Hafta', '2w': 'Son 2 Hafta', '1m': 'Son 1 Ay' };
       list.push(`Zaman: ${timeNames[timeRange] || timeRange}`);
     }
     return list;
@@ -191,6 +191,7 @@ export default function ThreatFeed() {
               <option value="today">Bugün (Son 24 Saat)</option>
               <option value="1w">Son 1 Hafta</option>
               <option value="2w">Son 2 Hafta</option>
+              <option value="1m">Son 1 Ay</option>
             </select>
           </div>
 

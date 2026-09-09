@@ -101,7 +101,8 @@ func (d *DB) migrate(ctx context.Context) error {
 		}
 	}
 
-	// Gelecek tarihli RSS/etkinlik kayıtlarını gerçek kayıt tarihine çekerek sıralama tutarlılığını sağla
+	// Bozuk indeks varsa otomatik onar ve gelecek tarihli kayıtları gerçek kayıt tarihine çek
+	_, _ = d.conn.ExecContext(ctx, "REINDEX;")
 	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > datetime('now', '+5 minutes');")
 
 	return nil

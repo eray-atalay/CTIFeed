@@ -101,6 +101,9 @@ func (d *DB) migrate(ctx context.Context) error {
 		}
 	}
 
+	// Gelecek tarihli RSS/etkinlik kayıtlarını gerçek kayıt tarihine çekerek sıralama tutarlılığını sağla
+	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > datetime('now', '+5 minutes');")
+
 	return nil
 }
 
@@ -113,6 +116,11 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 
 	if article.CreatedAt.IsZero() {
 		article.CreatedAt = time.Now().UTC()
+	}
+
+	// Gelecek tarihli RSS veya etkinlik duyurularının feed sırasını bozmaması için:
+	if article.PublishedAt.After(time.Now().Add(5 * time.Minute)) {
+		article.PublishedAt = article.CreatedAt
 	}
 
 	query := `

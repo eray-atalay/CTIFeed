@@ -11,9 +11,9 @@ import type { Article, SourceInfo } from '../../types/cti';
 
 const TAG_PILLS = [
   { label: 'Tüm Beslemeler', tag: '' },
-  { label: 'TR-Focus (+50)', tag: 'TR-Focus', className: 'pill-tr' },
+  { label: 'TR-Focus', tag: 'TR-Focus', className: 'pill-tr' },
   { label: 'Zero-Day', tag: 'zero-day', className: 'pill-alert' },
-  { label: 'In-The-Wild (+25)', tag: 'in-the-wild', className: 'pill-exploit' },
+  { label: 'In-The-Wild', tag: 'in-the-wild', className: 'pill-exploit' },
   { label: 'Ransomware', tag: 'ransomware', className: 'pill-ransom' },
   { label: 'RCE', tag: 'rce', className: 'pill-rce' },
   { label: 'Auth Bypass', tag: 'auth-bypass' },

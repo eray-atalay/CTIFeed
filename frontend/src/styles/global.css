@@ -536,11 +536,6 @@ button {
   color: #fdba74;
 }
 
-.pill-exploit {
-  border-color: rgba(234, 88, 12, 0.3);
-  color: #fb923c;
-}
-
 .pill-exploit.active {
   background: #3e2010;
   border-color: #ea580c;

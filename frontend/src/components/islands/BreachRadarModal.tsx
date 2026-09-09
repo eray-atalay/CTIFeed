@@ -3,7 +3,7 @@ import { activeModal, closeModal, formatTimeAgo } from '../../services/store';
 import { fetchArticles } from '../../services/api';
 import type { Article } from '../../types/cti';
 
-export default function CveRadarModal() {
+export default function BreachRadarModal() {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [allArticles, setAllArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -15,10 +15,10 @@ export default function CveRadarModal() {
 
   useEffect(() => {
     const unsub = activeModal.subscribe((val) => {
-      const open = val === 'cve';
+      const open = val === 'breach';
       setIsOpen(open);
       if (open) {
-        loadCveData();
+        loadBreachData();
       }
     });
 
@@ -33,13 +33,16 @@ export default function CveRadarModal() {
     };
   }, []);
 
-  const loadCveData = async () => {
+  const loadBreachData = async () => {
     setLoading(true);
     try {
-      const res = await fetchArticles({ limit: 250, sort: 'date' });
+      let res = await fetchArticles({ source: 'breachdetect', limit: 300, sort: 'date' });
+      if (!res.articles || res.articles.length === 0) {
+        res = await fetchArticles({ limit: 300, sort: 'date' });
+      }
       setAllArticles(res.articles || []);
     } catch (err) {
-      console.error('CVE verisi alınırken hata:', err);
+      console.error('Sızıntı verisi alınırken hata:', err);
     } finally {
       setLoading(false);
     }
@@ -53,14 +56,14 @@ export default function CveRadarModal() {
     }, 250);
   };
 
-  const filteredCves = useMemo(() => {
+  const filteredBreaches = useMemo(() => {
+    // Sadece Telegram kanalından gelen haberler filtrelenir (Bloglar ve genel RSS hariç tutulur)
     let items = allArticles.filter((a) => {
-      const isTelegram = a.source && a.source.startsWith('Telegram:');
-      const hasCveTag = (a.tags || []).some((t) => t.toUpperCase().startsWith('CVE-'));
-      const hasCveText =
-        (a.title && a.title.toUpperCase().includes('CVE-')) ||
-        (a.summary && a.summary.toUpperCase().includes('CVE-'));
-      return isTelegram || hasCveTag || hasCveText;
+      const src = (a.source || '').toLowerCase();
+      const link = (a.link || '').toLowerCase();
+      const isTelegram = src.startsWith('telegram:') || link.includes('t.me/');
+      const isBreach = src.includes('breachdetect') || link.includes('breachdetect');
+      return isTelegram && isBreach;
     });
 
     if (debouncedSearch) {
@@ -68,6 +71,7 @@ export default function CveRadarModal() {
         (a) =>
           (a.title && a.title.toLowerCase().includes(debouncedSearch)) ||
           (a.summary && a.summary.toLowerCase().includes(debouncedSearch)) ||
+          (a.source && a.source.toLowerCase().includes(debouncedSearch)) ||
           (a.tags && a.tags.some((t) => t.toLowerCase().includes(debouncedSearch)))
       );
     }
@@ -98,16 +102,16 @@ export default function CveRadarModal() {
           <div class="ioc-modal-header-top">
             <div>
               <h2>
-                CVE Zafiyet Akışı & Telegram Bildirimleri
+                Veri Sızıntısı Radarı (BreachDetect)
                 <span
                   class="feed-count-badge"
-                  style="background: rgba(244, 63, 94, 0.2); color: #fda4af; font-size: 0.8rem; padding: 2px 8px; border-radius: 6px; margin-left: 8px;"
+                  style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; font-size: 0.8rem; padding: 2px 8px; border-radius: 6px; margin-left: 8px;"
                 >
-                  {filteredCves.length} zafiyet
+                  {filteredBreaches.length} sızıntı
                 </span>
               </h2>
               <p class="modal-sub">
-                Telegram kanalları ve global CTI kaynaklarından toplanan tüm CVE güvenlik açıkları.
+                Telegram @breachdetect kanalından anlık çekilen kurumsal veri sızıntıları ve siber vakalar.
               </p>
             </div>
           </div>
@@ -115,7 +119,7 @@ export default function CveRadarModal() {
             <input
               type="text"
               class="ioc-search-input"
-              placeholder="CVE kodu veya zafiyet adı ara (örn: CVE-2026, Fortinet, RCE)..."
+              placeholder="Kurum, ülke veya sızıntı ara..."
               value={search}
               onInput={(e: any) => handleSearchChange(e.target.value)}
               style="flex: 1;"
@@ -136,30 +140,28 @@ export default function CveRadarModal() {
         <div class="ioc-table-container" style="max-height: calc(85vh - 170px);">
           {loading ? (
             <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-              CVE kayıtları yükleniyor...
+              Sızıntı kayıtları yükleniyor...
             </div>
           ) : (
             <table class="ioc-table">
               <thead>
                 <tr>
-                  <th style="width: 150px;">CVE Kodu</th>
-                  <th>Zafiyet & Tehdit Özeti</th>
-                  <th style="width: 190px;">Kaynak</th>
+                  <th style="width: 140px;">Kategori</th>
+                  <th>Sızıntı & Hedef Kurum Özeti</th>
+                  <th style="width: 170px;">Kaynak</th>
                   <th style="width: 120px;">Yayınlanma</th>
                   <th style="width: 80px; text-align: center;">Bağlantı</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredCves.map((art) => {
-                  const cveTags = (art.tags || []).filter((t) => t.toUpperCase().startsWith('CVE-'));
-                  const cveLabel = cveTags.length > 0 ? cveTags.join(', ') : 'CVE Bildirimi';
+                {filteredBreaches.map((art) => {
                   const timeAgo = formatTimeAgo(art.published_at);
 
                   return (
-                    <tr key={art.id}>
+                    <tr key={art.id || art.link}>
                       <td>
-                        <span class="tag-item tag-cve" style="font-size:0.8rem;">
-                          {cveLabel}
+                        <span class="tag-item tag-tr" style="font-size: 0.75rem;">
+                          VERİ SIZINTISI
                         </span>
                       </td>
                       <td>
@@ -183,7 +185,7 @@ export default function CveRadarModal() {
                           rel="noopener noreferrer"
                           class="btn-link"
                         >
-                          Rapor &rarr;
+                          Kanal &rarr;
                         </a>
                       </td>
                     </tr>
@@ -193,9 +195,9 @@ export default function CveRadarModal() {
             </table>
           )}
 
-          {!loading && filteredCves.length === 0 && (
+          {!loading && filteredBreaches.length === 0 && (
             <div class="ioc-empty-state">
-              <p>Arama kriterine uygun CVE kaydı bulunamadı.</p>
+              <p>Arama kriterine uygun sızıntı kaydı bulunamadı.</p>
             </div>
           )}
         </div>

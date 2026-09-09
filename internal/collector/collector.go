@@ -261,6 +261,9 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 				pubDate = parsedT
 			}
 		}
+		if pubDate.After(time.Now().Add(5 * time.Minute)) {
+			pubDate = time.Now().UTC()
+		}
 
 		if !pubDate.IsZero() && pubDate.Before(cutoff) {
 			oldCnt++
@@ -368,6 +371,9 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 					pubDate = t.UTC()
 				}
 			}
+			if pubDate.After(time.Now().Add(5 * time.Minute)) {
+				pubDate = time.Now().UTC()
+			}
 
 			extractedIoCs := ioc.Extract(rawText)
 			scoringResult := scorer.Evaluate(title, rawText)
@@ -437,8 +443,9 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 			continue
 		}
 
-		if pubDate.IsZero() {
-			pubDate = time.Now().UTC()
+		now := time.Now().UTC()
+		if pubDate.IsZero() || pubDate.After(now.Add(5*time.Minute)) {
+			pubDate = now
 		}
 
 		cleanTitle := scorer.StripHTML(item.Title)

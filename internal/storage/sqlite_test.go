@@ -46,7 +46,7 @@ func TestSaveArticleAndDeduplication(t *testing.T) {
 		PublishedAt: time.Now().Add(-2 * time.Hour),
 	}
 
-	// 1. İlk ekleme başarılı olmalıdır
+	// Initial insert
 	inserted, err := db.SaveArticle(ctx, article)
 	if err != nil {
 		t.Fatalf("unexpected error on first insert: %v", err)
@@ -58,7 +58,7 @@ func TestSaveArticleAndDeduplication(t *testing.T) {
 		t.Errorf("expected non-zero article ID after insert")
 	}
 
-	// 2. Aynı bağlantının ikinci eklemesi atlanmalıdır (mükerrerlik engelleme)
+	// Duplicate insert should be ignored
 	articleDuplicate := &model.Article{
 		Source:      "BleepingComputer",
 		Title:       "New Ransomware Campaign Targets ESXi Servers",
@@ -77,7 +77,7 @@ func TestSaveArticleAndDeduplication(t *testing.T) {
 		t.Fatalf("expected duplicate insert to be ignored (inserted = false), got true")
 	}
 
-	// Toplam makale sayısının hala 1 olduğunu doğrula
+	// Verify count remains 1
 	stats, err := db.GetStats(ctx)
 	if err != nil {
 		t.Fatalf("failed to get stats: %v", err)
@@ -121,9 +121,9 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 		t.Fatalf("expected 2 inserted and 0 skipped, got %d inserted, %d skipped", inserted, skipped)
 	}
 
-	// 1 mevcut ve 1 yeni makale ile toplu işlemi yeniden çalıştır
+	// Batch insert with 1 duplicate and 1 new article
 	newBatch := []*model.Article{
-		articles[0], // mükerrer
+		articles[0],
 		{
 			Source:      "Unit 42",
 			Title:       "Analysis of Recent APT Campaign",
@@ -143,7 +143,7 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 		t.Fatalf("expected 1 inserted and 1 skipped, got %d inserted, %d skipped", inserted, skipped)
 	}
 
-	// En yüksek puanlı makaleleri sorgula
+	// Query top articles
 	top, err := db.GetTopArticles(ctx, 10, 0)
 	if err != nil {
 		t.Fatalf("GetTopArticles failed: %v", err)
@@ -151,12 +151,12 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 	if len(top) != 3 {
 		t.Fatalf("expected 3 articles, got %d", len(top))
 	}
-	// En yüksek skor ilk sırada olmalıdır (85)
+	// Highest score should be ordered first
 	if top[0].Score != 85 {
 		t.Fatalf("expected top score 85, got %d (%s)", top[0].Score, top[0].Title)
 	}
 
-	// İstatistikleri kontrol et
+	// Verify metrics
 	stats, err := db.GetStats(ctx)
 	if err != nil {
 		t.Fatalf("GetStats failed: %v", err)
@@ -164,14 +164,14 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 	if stats.TotalArticles != 3 {
 		t.Errorf("expected 3 total articles, got %d", stats.TotalArticles)
 	}
-	if stats.HighPriorityCount != 2 { // 85 ve 50 skorları >= 50'dir
+	if stats.HighPriorityCount != 2 {
 		t.Errorf("expected 2 high priority articles, got %d", stats.HighPriorityCount)
 	}
 	if stats.CriticalVulnerabilities != 1 {
 		t.Errorf("expected 1 CVE article, got %d", stats.CriticalVulnerabilities)
 	}
 
-	// Analitik verilerini test et
+	// Verify analytics data
 	analytics, err := db.GetAnalytics(ctx)
 	if err != nil {
 		t.Fatalf("GetAnalytics failed: %v", err)
@@ -189,7 +189,7 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 		t.Errorf("expected at least 1 vendor (vmware), got 0")
 	}
 
-	// IoC depolama ve sorgulama testleri
+	// Test IoC storage and queries
 	testIoCs := []model.IoC{
 		{Type: model.IoCTypeIP, Value: "194.26.29.112"},
 		{Type: model.IoCTypeDomain, Value: "evil-campaign.top"},
@@ -201,7 +201,6 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 		t.Fatalf("SaveIoCs failed: %v", err)
 	}
 
-	// IoC listeleme testi
 	iocs, count, err := db.GetIoCs(ctx, model.IoCFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("GetIoCs failed: %v", err)
@@ -210,13 +209,11 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 		t.Fatalf("expected 3 iocs, got count=%d, len=%d", count, len(iocs))
 	}
 
-	// Tip filtresi testi
 	ipIoCs, _, err := db.GetIoCs(ctx, model.IoCFilter{Type: "ip"})
 	if err != nil || len(ipIoCs) != 1 {
 		t.Fatalf("expected 1 ip ioc, got %d (err: %v)", len(ipIoCs), err)
 	}
 
-	// TXT ve CSV Export testi
 	txtBytes, err := db.ExportIoCs(ctx, "", "txt")
 	if err != nil || len(txtBytes) == 0 {
 		t.Fatalf("ExportIoCs txt failed: %v", err)

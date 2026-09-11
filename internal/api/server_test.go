@@ -29,7 +29,7 @@ func setupTestServer(t *testing.T) (*Server, func()) {
 		t.Fatalf("failed to init db: %v", err)
 	}
 
-	// Örnek bir makale ekle
+	// Seed test article
 	ctx := context.Background()
 	_, _ = db.SaveArticle(ctx, &model.Article{
 		Source:      "SecurityWeek",
@@ -87,7 +87,7 @@ func TestAPIEndpoints(t *testing.T) {
 	srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	// 1. /api/stats testi
+	// Test /api/stats
 	{
 		req := httptest.NewRequest("GET", "/api/stats", nil)
 		rec := httptest.NewRecorder()
@@ -109,7 +109,7 @@ func TestAPIEndpoints(t *testing.T) {
 		}
 	}
 
-	// 2. /api/sources testi
+	// Test /api/sources
 	{
 		req := httptest.NewRequest("GET", "/api/sources", nil)
 		rec := httptest.NewRecorder()
@@ -131,7 +131,7 @@ func TestAPIEndpoints(t *testing.T) {
 		}
 	}
 
-	// 3. Filtreleme ile /api/articles testi
+	// Test /api/articles with filtering
 	{
 		req := httptest.NewRequest("GET", "/api/articles?tag=TR-Focus", nil)
 		rec := httptest.NewRecorder()
@@ -157,7 +157,7 @@ func TestAPIEndpoints(t *testing.T) {
 		}
 	}
 
-	// 4. /api/analytics endpoint testi
+	// Test /api/analytics
 	{
 		req := httptest.NewRequest("GET", "/api/analytics", nil)
 		rec := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestAPIEndpoints(t *testing.T) {
 		}
 	}
 
-	// 5. /api/iocs ve /api/iocs/export testleri
+	// Test /api/iocs and /api/iocs/export
 	{
 		req := httptest.NewRequest("GET", "/api/iocs", nil)
 		rec := httptest.NewRecorder()

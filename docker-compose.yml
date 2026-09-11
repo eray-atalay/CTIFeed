@@ -8,7 +8,7 @@ services:
     ports:
       - "8081:8080"
     volumes:
-      # SQLite veritabanini yerel ./data klasorunde kalici olarak sakla
+      # Persist SQLite database in local ./data directory
       - ./data:/data
     environment:
       - PORT=8080

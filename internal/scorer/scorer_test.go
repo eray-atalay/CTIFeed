@@ -216,13 +216,8 @@ func TestNewThreatVectorsScoring(t *testing.T) {
 }
 
 func TestCumulativeScoring(t *testing.T) {
-	// 5 kategorinin tumuyle eslesen ornek haber:
-	// 1. Turkiye Odagi (+50): "Turkish", "USOM"
-	// 2. Kritik Urun (+30): "Fortinet", "WordPress"
-	// 3. CVE (+35): "CVE-2024-12345"
-	// 4. Aktif Somuru (+25): "actively exploited"
-	// 5. Tehdit Vektoru (+20): "zero-day", "RCE", "ransomware"
-	// Toplam Puan: 50 + 35 + 30 + 25 + 20 = 160
+	// Sample article matching all scoring criteria:
+	// TR-Focus (50) + Product (30) + CVE (35) + Exploited (25) + Threat Vector (20) = 160
 	title := "Turkish Institutions Warned by USOM: Zero-Day RCE in Fortinet (CVE-2024-12345) Actively Exploited in Ransomware Attacks"
 	summary := "A widespread campaign affecting WordPress sites and Fortinet firewalls in Istanbul."
 

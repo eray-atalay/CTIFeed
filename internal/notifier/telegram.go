@@ -156,7 +156,7 @@ func (tb *TelegramBot) buildKeyboard(chatID int64) tgbotapi.InlineKeyboardMarkup
 
 	currentPeriod := tb.getSelectedPeriod(chatID)
 
-	// 1. Satır: Zaman Aralığı Butonları
+	// Time range buttons
 	p1, p2, p3 := "Son 24 Saat", "Son 1 Hafta", "Son 1 Ay"
 	if currentPeriod == "1d" {
 		p1 = "🎯 24 Saat"
@@ -173,7 +173,7 @@ func (tb *TelegramBot) buildKeyboard(chatID int64) tgbotapi.InlineKeyboardMarkup
 	var rows [][]tgbotapi.InlineKeyboardButton
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(btnDay, btnWeek, btnMonth))
 
-	// 2. Kategori Butonları (Tam normalize eşleşme)
+	// Category buttons
 	for _, cat := range CategoryCatalog {
 		state := "[   ]"
 		catKeyClean := strings.ToLower(strings.TrimSpace(cat.Key))
@@ -185,12 +185,11 @@ func (tb *TelegramBot) buildKeyboard(chatID int64) tgbotapi.InlineKeyboardMarkup
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 	}
 
-	// 3. Toplu İşlem Butonları
+	// Bulk action buttons
 	btnSelectAll := tgbotapi.NewInlineKeyboardButtonData("✅ Tümünü Seç", "cmd:select_all")
 	btnClearAll := tgbotapi.NewInlineKeyboardButtonData("❌ Tümünü Temizle", "cmd:clear_all")
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(btnSelectAll, btnClearAll))
 
-	// 4. Haberleri Getir Butonu
 	btnFetch := tgbotapi.NewInlineKeyboardButtonData("📥 Seçilenlerle Tehditleri Getir", "cmd:fetch_news")
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(btnFetch))
 
@@ -350,7 +349,7 @@ func (tb *TelegramBot) fetchFilteredArticles(chatID int64) {
 	headerMsg.ParseMode = "HTML"
 	tb.bot.Send(headerMsg)
 
-	// En fazla 5-6 kart basarak ekranı taşırmayalım
+	// Limit message batch to prevent flooding
 	maxShow := 5
 	if len(finalArticles) < maxShow {
 		maxShow = len(finalArticles)

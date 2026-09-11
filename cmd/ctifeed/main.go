@@ -50,12 +50,10 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Enable verbose debug logs")
 	flag.Parse()
 
-	// Ortam değişkeninden token kontrolü (CLI bayrağı verilmemişse)
+	// Read environment overrides
 	if envTG := os.Getenv("TELEGRAM_BOT_TOKEN"); envTG != "" && cfg.TelegramToken == "" {
 		cfg.TelegramToken = envTG
 	}
-
-	// Konteyner/bulut ortamı için ortam değişkenlerini oku
 	if envPort := os.Getenv("PORT"); envPort != "" && *port == "8080" {
 		*port = envPort
 	}
@@ -83,7 +81,7 @@ func main() {
 		}
 	}
 
-	// Yapılandırılmış günlükleyiciyi (slog) ayarla
+	// Initialize logger
 	logLevel := slog.LevelInfo
 	if *verbose {
 		logLevel = slog.LevelDebug
@@ -95,7 +93,7 @@ func main() {
 
 	fmt.Print(banner)
 
-	// SQLite veritabanı depolamasını başlat
+	// Initialize storage
 	db, err := storage.NewDB(cfg.DBPath)
 	if err != nil {
 		slog.Error("Failed to initialize database", slog.String("error", err.Error()))
@@ -108,24 +106,24 @@ func main() {
 
 	col := collector.New(cfg)
 
-	// Telegram botunu başlat (Token varsa aktifleşir, yoksa nil döner)
+	// Initialize Telegram bot if token is configured
 	tgBot, err := notifier.NewTelegramBot(cfg.TelegramToken, db)
 	if err != nil {
-		slog.Error("Telegram bot başlatılamadı", slog.String("error", err.Error()))
+		slog.Error("Failed to initialize Telegram bot", slog.String("error", err.Error()))
 	} else if tgBot != nil {
 		tgBot.Start()
 		defer tgBot.Stop()
-		slog.Info("Telegram bildirim servisi devrede")
+		slog.Info("Telegram alert service active")
 	}
 
-	// Zarif kapatma (graceful shutdown) dinleyicisini yapılandır
+	// Graceful shutdown handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	// Eski CLI modu talep edilmişse:
+	// CLI-only execution mode
 	if *cliMode {
 		slog.Info("Running in CLI mode", slog.Int("sources", len(cfg.Sources)), slog.Int("workers", cfg.Workers))
 		go func() {
@@ -157,7 +155,7 @@ func main() {
 		}
 	}
 
-	// Varsayılan: Modern Web Paneli Sunucusunu çalıştır
+	// Start web dashboard server
 	addr := ":" + *port
 	server := api.NewServer(cfg, db, col, addr)
 
@@ -165,7 +163,7 @@ func main() {
 		server.SetNotifier(tgBot)
 	}
 
-	// Veritabanında makale olup olmadığını kontrol et; 0 ise arka planda ilk taramayı başlat
+	// Trigger initial background scan if DB is empty
 	stats, err := db.GetStats(ctx)
 	if err == nil && stats.TotalArticles == 0 {
 		slog.Info("Database is empty. Starting initial feed collection cycle in background...")
@@ -174,7 +172,7 @@ func main() {
 		}()
 	}
 
-	// Aralık yapılandırılmışsa arka plan zamanlanmış taramaları başlat
+	// Background ticker for scheduled scans
 	if cfg.Interval > 0 {
 		go func() {
 			ticker := time.NewTicker(cfg.Interval)
@@ -191,7 +189,6 @@ func main() {
 		}()
 	}
 
-	// Sunucu goroutine'i
 	serverErr := make(chan error, 1)
 	go func() {
 		dashboardURL := fmt.Sprintf("http://localhost:%s", *port)
@@ -210,7 +207,7 @@ func main() {
 		}
 	}()
 
-	// Kapatma sinyalini veya kritik sunucu hatasını bekle
+	// Wait for termination signal or server error
 	select {
 	case sig := <-sigChan:
 		slog.Warn("Received shutdown signal, terminating web server...", slog.String("signal", sig.String()))
@@ -243,7 +240,6 @@ func runCollectionCycle(ctx context.Context, col *collector.Collector, db *stora
 		slog.Duration("duration", res.Duration),
 	)
 
-	// Toplanan makaleleri mükerrerlik kontrolüyle SQLite'a kaydet
 	inserted, skipped, err := db.SaveArticles(ctx, res.Articles)
 	if err != nil {
 		slog.Error("Error saving articles to database", slog.String("error", err.Error()))
@@ -253,7 +249,6 @@ func runCollectionCycle(ctx context.Context, col *collector.Collector, db *stora
 			slog.Int("duplicates_skipped", skipped),
 		)
 
-		// CLI modunda da yeni eklenen haberleri Telegram abonelerine ilet
 		if inserted > 0 && tgBot != nil {
 			var newArticles []*model.Article
 			for _, a := range res.Articles {

@@ -21,13 +21,13 @@ import (
 	"ctifeed/internal/scorer"
 )
 
-// Collector, RSS/Atom ve Telegram beslemelerinin eşzamanlı çekilmesini yönetir.
+// Collector manages concurrent fetching and parsing of CTI feeds.
 type Collector struct {
 	cfg        *config.Config
 	httpClient *http.Client
 }
 
-// Result, bir besleme toplama döngüsünün sonucunu barındırır.
+// Result represents the aggregated outcome of a feed collection cycle.
 type Result struct {
 	Articles     []*model.Article
 	FeedsSuccess int
@@ -60,7 +60,7 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
-// New, özel HTTP istemcisine sahip yeni bir Collector oluşturur.
+// New initializes a Collector with configured HTTP client and timeout settings.
 func New(cfg *config.Config) *Collector {
 	baseTransport := &http.Transport{
 		MaxIdleConns:        100,
@@ -85,7 +85,7 @@ func New(cfg *config.Config) *Collector {
 	}
 }
 
-// CollectAll, tüm kaynakları paralel olarak çeker.
+// CollectAll fetches all configured feed sources concurrently.
 func (c *Collector) CollectAll(ctx context.Context) Result {
 	startTime := time.Now()
 	sources := c.cfg.Sources
@@ -163,7 +163,7 @@ func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, res
 			results <- feedResult{source: job.source, err: ctx.Err()}
 			return
 		default:
-			// Telegram kanali mi standart RSS mi kontrol et
+			// Check whether target is a Telegram channel or standard RSS/Atom
 			if strings.HasPrefix(job.source.URL, "telegram://") || strings.Contains(job.source.URL, "t.me/s/") {
 				articles, oldCnt, err := c.fetchTelegramFeed(ctx, job.source)
 				results <- feedResult{
@@ -185,7 +185,7 @@ func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, res
 	}
 }
 
-// fetchTelegramFeed, Telegram kanallarından mesajları çeker.
+// fetchTelegramFeed parses public Telegram channel web previews.
 func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
@@ -205,7 +205,7 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 		}
 	}
 
-	// Standart herkese açık kanallar (cveNotify gibi t.me/s/...)
+	// Standard public channel preview
 	channelName = strings.TrimPrefix(channelName, "https://t.me/s/")
 	channelName = strings.TrimPrefix(channelName, "http://t.me/s/")
 	targetURL := fmt.Sprintf("https://t.me/s/%s", channelName)
@@ -298,8 +298,7 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 	return articles, oldCnt, nil
 }
 
-// fetchTelegramByID, web önizlemesi kapalı kanalları meta etiketlerinden geriye dönük çeker.
-// fetchTelegramByID, web önizlemesi kapalı kanalları meta etiketlerinden paralel çeker.
+// fetchTelegramByID parses channel posts concurrently via OpenGraph meta tags.
 func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource, channel string, latestID int) ([]*model.Article, int, error) {
 	descRegex := regexp.MustCompile(`<meta property="og:description" content="([^"]+)"`)
 	contentRegex := regexp.MustCompile(`(?i)"Content":\s*"([^"]+)"`)
@@ -313,7 +312,7 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 	resChan := make(chan postResult, totalPosts)
 	var wg sync.WaitGroup
 
-	// İstekleri sıralı değil, eşzamanlı (paralel) gönderiyoruz:
+	// Fetch posts concurrently
 	for i := 0; i < totalPosts; i++ {
 		postID := latestID - i
 		wg.Add(1)
@@ -410,7 +409,7 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 	return articles, 0, nil
 }
 
-// fetchFeed, standart RSS/Atom beslemelerini ceker.
+// fetchFeed parses standard RSS/Atom feeds.
 func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, c.cfg.Timeout)
 	defer cancel()

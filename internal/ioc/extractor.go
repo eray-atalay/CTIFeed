@@ -10,19 +10,17 @@ import (
 )
 
 var (
-	// Regex kuralları
+	// Extraction regular expressions
 	ipv4Regex   = regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b`)
 	sha256Regex = regexp.MustCompile(`\b[a-fA-F0-9]{64}\b`)
 	md5Regex    = regexp.MustCompile(`\b[a-fA-F0-9]{32}\b`)
 	domainRegex = regexp.MustCompile(`\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|net|org|io|ru|cn|top|xyz|biz|info|cc|to|co|uk|de|me|live|online|site|club|vip|pro|tk|ml|ga|cf|gq|su|onion)\b`)
 
-	// Defanged dot içeren alan adları (örn: evil[.]com, c2(dot)ru, bad{.}xyz, evil[dot]top)
+	// Defanged domain and URL patterns (e.g. evil[.]com, hxxps://bad.xyz)
 	defangedDotRegex = regexp.MustCompile(`(?i)\b[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\s*(?:\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\))\s*[a-zA-Z0-9-]+)+\b`)
-
-	// Defanged protokol içeren URL'ler (örn: hxxp://evil.com, hxxps://bad.xyz/path)
 	defangedURLRegex = regexp.MustCompile(`(?i)\b(?:hxxps?|hXXps?):\/\/([^\s/:"'>]+)`)
 
-	// Defang temizleme kuralları
+	// Defang sanitization mappings
 	defangReplacer = strings.NewReplacer(
 		"hxxps://", "https://",
 		"hxxp://", "http://",
@@ -37,7 +35,7 @@ var (
 		"[@]", "@",
 	)
 
-	// Bilinen güvenli DNS ve CDN IP'leri
+	// Public DNS resolvers to exclude
 	publicDNS = map[string]bool{
 		"1.1.1.1":         true,
 		"1.0.0.1":         true,
@@ -49,7 +47,7 @@ var (
 		"208.67.220.220":  true,
 	}
 
-	// Beyaz Liste Alan Adları (Haber kaynakları, teknoloji devleri, CDN'ler)
+	// Common non-threat domains and platforms to ignore
 	domainWhitelist = map[string]bool{
 		"google.com":                true,
 		"microsoft.com":             true,
@@ -116,7 +114,7 @@ func Extract(text string) []model.IoC {
 	var results []model.IoC
 	seen := make(map[string]bool)
 
-	// 1. IPv4 Çıkarımı ve Filtreleme
+	// IPv4 extraction and validation
 	ipMatches := ipv4Regex.FindAllString(normalized, -1)
 	for _, ipStr := range ipMatches {
 		ip := net.ParseIP(ipStr)
@@ -124,12 +122,11 @@ func Extract(text string) []model.IoC {
 			continue
 		}
 
-		// RFC1918 özel IP'leri, döngüsel (loopback), çok noktaya yayın (multicast) filtrele
+		// Exclude private (RFC1918), loopback, and multicast ranges
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsMulticast() || ip.IsUnspecified() {
 			continue
 		}
 
-		// Bilinen güvenli DNS ve 0.0.0.0 filtrele
 		if publicDNS[ipStr] || ipStr == "255.255.255.255" {
 			continue
 		}
@@ -144,7 +141,7 @@ func Extract(text string) []model.IoC {
 		}
 	}
 
-	// 2. SHA256 Çıkarımı
+	// SHA256 extraction
 	sha256Matches := sha256Regex.FindAllString(normalized, -1)
 	for _, h := range sha256Matches {
 		hLow := strings.ToLower(h)
@@ -161,7 +158,7 @@ func Extract(text string) []model.IoC {
 		}
 	}
 
-	// 3. MD5 Çıkarımı (SHA256 ile çakışmayanlar)
+	// MD5 extraction
 	md5Matches := md5Regex.FindAllString(normalized, -1)
 	for _, h := range md5Matches {
 		hLow := strings.ToLower(h)
@@ -178,18 +175,14 @@ func Extract(text string) []model.IoC {
 		}
 	}
 
-	// 4. Alan Adı (Domain) Çıkarımı: SADECE DEFANG EDİLMİŞ ALAN ADLARI KABUL EDİLİR.
-	// Haberlerde geçen mağdur/kurban şirket isimlerinin (hopcharge.com vb.) veya haber
-	// kaynaklarının yanlışlıkla IoC sanılmasını (False Positive) önlemek için yalnızca orijinal
-	// metinde defang edilmiş ([.], (.), {.}, [dot], hxxp://) olanlar ayıklanıp refang edilir.
+	// Domain extraction: only accept indicators explicitly defanged in raw text
+	// to avoid false positives on cited victim organizations or vendors.
 	var candidateDomains []string
 
-	// a. Defang edilmiş nokta içerenler (örn: evil-campaign[.]top, c2-server[.]ru)
 	for _, m := range defangedDotRegex.FindAllString(text, -1) {
 		candidateDomains = append(candidateDomains, Refang(m))
 	}
 
-	// b. Defang edilmiş protokol içerenler (örn: hxxps://bad-site.xyz/payload)
 	for _, sub := range defangedURLRegex.FindAllStringSubmatch(text, -1) {
 		if len(sub) > 1 {
 			candidateDomains = append(candidateDomains, Refang(sub[1]))

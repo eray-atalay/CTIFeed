@@ -13,13 +13,12 @@ import (
 	"ctifeed/internal/model"
 )
 
-// DB, SQLite veritabanı işlemlerini yönetir.
+// DB handles SQLite storage operations.
 type DB struct {
 	conn *sql.DB
 }
 
-// NewDB, belirtilen dosya yolunda SQLite veritabanını açar veya oluşturur,
-// pragma ayarlarını yapılandırır ve gerekli tablo ve indekslerin varlığını doğrular.
+// NewDB opens or initializes the SQLite database at the given path.
 func NewDB(dbPath string) (*DB, error) {
 	conn, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -46,12 +45,12 @@ func NewDB(dbPath string) (*DB, error) {
 	return db, nil
 }
 
-// Close, alt katmandaki veritabanı bağlantısını kapatır.
+// Close closes the database connection.
 func (d *DB) Close() error {
 	return d.conn.Close()
 }
 
-// migrate, veritabanı şemasını ve indekslerini başlatır.
+// migrate ensures database schema, indices, and cleanup tasks are executed.
 func (d *DB) migrate(ctx context.Context) error {
 	queries := []string{
 		`PRAGMA journal_mode = WAL;`,
@@ -101,14 +100,13 @@ func (d *DB) migrate(ctx context.Context) error {
 		}
 	}
 
-	// Bozuk indeks varsa otomatik onar ve gelecek tarihli kayıtları gerçek kayıt tarihine çek
 	_, _ = d.conn.ExecContext(ctx, "REINDEX;")
 	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > datetime('now', '+5 minutes');")
 
 	return nil
 }
 
-// SaveArticle, haber kaydını henüz mevcut değilse veritabanına ekler.
+// SaveArticle inserts an article if it does not already exist.
 func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, error) {
 	tagsJSON, err := json.Marshal(article.Tags)
 	if err != nil {
@@ -119,7 +117,7 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 		article.CreatedAt = time.Now().UTC()
 	}
 
-	// Gelecek tarihli RSS veya etkinlik duyurularının feed sırasını bozmaması için:
+	// Normalize future timestamps if published_at is ahead of current time
 	if article.PublishedAt.After(time.Now().Add(5 * time.Minute)) {
 		article.PublishedAt = article.CreatedAt
 	}
@@ -163,7 +161,7 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 	return false, nil
 }
 
-// SaveArticles, bir dizi haberi tek bir transaction içinde kaydeder.
+// SaveArticles writes a slice of articles and their extracted IoCs in a single transaction.
 func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, int, error) {
 	tx, err := d.conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -252,7 +250,7 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 	return inserted, skipped, nil
 }
 
-// GetTopArticles, en yüksek puanlı haberleri sorgular.
+// GetTopArticles returns the highest scoring articles.
 func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*model.Article, error) {
 	if limit <= 0 {
 		limit = 10
@@ -313,12 +311,12 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 	return articles, nil
 }
 
-// GetArticlesByTag, geriye dönük uyumluluk için son 48 saatteki haberleri getirir.
+// GetArticlesByTag returns articles matching a tag within the last 48 hours.
 func (d *DB) GetArticlesByTag(ctx context.Context, tag string, limit int) ([]*model.Article, error) {
 	return d.GetArticlesByTagAndTime(ctx, tag, time.Now().Add(-48*time.Hour), limit)
 }
 
-// GetArticlesByTagAndTime, belirli bir kategori ve zaman aralığına göre haberleri getirir.
+// GetArticlesByTagAndTime returns articles filtered by tag and minimum publication time.
 func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time.Time, limit int) ([]*model.Article, error) {
 	if limit <= 0 {
 		limit = 5
@@ -413,7 +411,7 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 	return articles, nil
 }
 
-// ArticleFilter, haber arama ve filtreleme parametrelerini tanımlar.
+// ArticleFilter defines criteria for querying stored articles.
 type ArticleFilter struct {
 	Search    string
 	Tag       string
@@ -425,7 +423,7 @@ type ArticleFilter struct {
 	TimeRange string
 }
 
-// QueryArticles, verilen kriterlere göre haberleri filtreler.
+// QueryArticles searches and paginates articles based on the given filter.
 func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.Article, int, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = 20
@@ -542,7 +540,7 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 	return articles, totalCount, nil
 }
 
-// Stats, toplanan haberlerin istatistik özetini barındırır.
+// Stats holds summary metrics of collected intelligence.
 type Stats struct {
 	TotalArticles           int `json:"total_articles"`
 	HighPriorityCount       int `json:"high_priority_count"`
@@ -550,7 +548,7 @@ type Stats struct {
 	TRFocusCount            int `json:"tr_focus_count"`
 }
 
-// GetStats, Telegram kanallarını hariç tutarak ana istatistikleri döner.
+// GetStats returns summary counts excluding auxiliary channels.
 func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 	var s Stats
 	row := d.conn.QueryRowContext(ctx, `
@@ -570,14 +568,14 @@ func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 	return s, nil
 }
 
-// ToggleSubscription, kullanıcının seçtiği kategoriyi tam eşleşmeyle açar veya kapatır.
+// ToggleSubscription toggles a user's subscription to a specific tag.
 func (d *DB) ToggleSubscription(ctx context.Context, chatID int64, tag string) (bool, error) {
 	tag = strings.TrimSpace(tag)
 
 	var exists int
 	err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_subscriptions WHERE chat_id = ? AND LOWER(tag) = LOWER(?)", chatID, tag).Scan(&exists)
 	if err != nil {
-		return false, fmt.Errorf("abonelik kontrol hatasi: %w", err)
+		return false, fmt.Errorf("subscription check error: %w", err)
 	}
 
 	if exists > 0 {
@@ -592,7 +590,7 @@ func (d *DB) ToggleSubscription(ctx context.Context, chatID int64, tag string) (
 	return true, err
 }
 
-// GetUserSubscriptions, kullanıcının aktif aboneliklerini listeler.
+// GetUserSubscriptions returns the active subscription tags for a chat ID.
 func (d *DB) GetUserSubscriptions(ctx context.Context, chatID int64) ([]string, error) {
 	rows, err := d.conn.QueryContext(ctx, "SELECT tag FROM user_subscriptions WHERE chat_id = ?", chatID)
 	if err != nil {
@@ -613,7 +611,7 @@ func (d *DB) GetUserSubscriptions(ctx context.Context, chatID int64) ([]string, 
 	return tags, nil
 }
 
-// GetAllSubscribers, tüm kullanıcıların izlediği etiketleri bir harita olarak döner.
+// GetAllSubscribers returns a mapping of chat IDs to subscribed tags.
 func (d *DB) GetAllSubscribers(ctx context.Context) (map[int64][]string, error) {
 	rows, err := d.conn.QueryContext(ctx, "SELECT chat_id, tag FROM user_subscriptions")
 	if err != nil {
@@ -633,7 +631,7 @@ func (d *DB) GetAllSubscribers(ctx context.Context) (map[int64][]string, error) 
 	return subscribers, nil
 }
 
-// GetSubscribersForTags, gelen haberin etiketlerine abone olan kişilerin chat_id'lerini döner.
+// GetSubscribersForTags returns chat IDs subscribed to any of the given tags.
 func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64, error) {
 	if len(tags) == 0 {
 		return nil, nil
@@ -668,27 +666,27 @@ func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64,
 	return chatIDs, nil
 }
 
-// TagStat, etiket ve kategori istatistiğini tutar.
+// TagStat tracks occurrence metrics for a tag.
 type TagStat struct {
 	Tag   string `json:"tag"`
 	Label string `json:"label"`
 	Count int    `json:"count"`
 }
 
-// VendorStat, hedeflenen üretici istatistiğini tutar.
+// VendorStat tracks vendor occurrences.
 type VendorStat struct {
 	Vendor string `json:"vendor"`
 	Count  int    `json:"count"`
 }
 
-// TimelineStat, günlük tehdit aktivite istatistiğini tutar.
+// TimelineStat tracks daily threat counts.
 type TimelineStat struct {
 	Date     string `json:"date"`
 	Total    int    `json:"total"`
 	Critical int    `json:"critical"`
 }
 
-// AnalyticsData, analitik grafikleri ve trend verilerini barındırır.
+// AnalyticsData contains aggregated metrics for visualizations.
 type AnalyticsData struct {
 	TopTags      []TagStat      `json:"top_tags"`
 	TopVendors   []VendorStat   `json:"top_vendors"`
@@ -697,7 +695,7 @@ type AnalyticsData struct {
 	AverageScore float64        `json:"average_score"`
 }
 
-// GetAnalytics, grafikler için Telegram hariç tutulmuş analitik verilerini toplar.
+// GetAnalytics collects analytics data for charts.
 func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 	data := &AnalyticsData{
 		TopTags:     make([]TagStat, 0),
@@ -706,10 +704,10 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		SourceShare: make([]TagStat, 0),
 	}
 
-	// 1. Ortalama Skor (Telegram Hariç)
+	// Average score
 	_ = d.conn.QueryRowContext(ctx, "SELECT COALESCE(AVG(score), 0) FROM articles WHERE source NOT LIKE 'Telegram:%';").Scan(&data.AverageScore)
 
-	// 2. Kaynak Dağılımı (Top 8, Telegram Hariç)
+	// Source distribution
 	srcRows, err := d.conn.QueryContext(ctx, `
 		SELECT source, COUNT(*) as cnt 
 		FROM articles 
@@ -729,7 +727,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		}
 	}
 
-	// 3. Son 7 Günün Aktivite Zaman Çizelgesi (Telegram Hariç)
+	// 7-day activity timeline
 	timeRows, err := d.conn.QueryContext(ctx, `
 		SELECT 
 			strftime('%Y-%m-%d', published_at) AS day,
@@ -839,7 +837,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 	return data, nil
 }
 
-// SaveIoCs, bir makaleyle ilişkili tespit edilen IoC'leri kaydeder.
+// SaveIoCs stores extracted IoCs associated with an article.
 func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, source string, iocs []model.IoC) error {
 	if len(iocs) == 0 {
 		return nil
@@ -865,7 +863,7 @@ func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, sourc
 	return nil
 }
 
-// GetIoCs, filtrelenebilir kriterlere göre IoC listesini döndürür.
+// GetIoCs queries IoCs matching the specified filter.
 func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, int, error) {
 	var whereClauses []string
 	var args []any
@@ -942,13 +940,13 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 	return iocs, totalCount, nil
 }
 
-// GetIoCsForArticle, belirli bir makaleye ait IoC'leri döner.
+// GetIoCsForArticle returns IoCs associated with a specific article ID.
 func (d *DB) GetIoCsForArticle(ctx context.Context, articleID int64) ([]model.IoC, error) {
 	iocs, _, err := d.GetIoCs(ctx, model.IoCFilter{ArticleID: articleID, Limit: 100})
 	return iocs, err
 }
 
-// ExportIoCs, IoC'leri TXT veya CSV formatında döndürür.
+// ExportIoCs formats IoCs as CSV or plain text blocklist.
 func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, error) {
 	filter := model.IoCFilter{
 		Type:  iocType,
@@ -987,7 +985,7 @@ func (d *DB) ExportIoCs(ctx context.Context, iocType, format string) ([]byte, er
 	return []byte(sb.String()), nil
 }
 
-// BackfillIoCs, veritabanında daha önce kaydedilmiş haberlerden geriye dönük IoC çıkarımı yapar.
+// BackfillIoCs extracts and indexes IoCs for existing articles in the database.
 func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []model.IoC) (int, error) {
 	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs WHERE type = 'domain';")
 

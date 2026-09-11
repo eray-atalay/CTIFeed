@@ -71,8 +71,8 @@ func TestCollectorWithMockFeed(t *testing.T) {
 		t.Errorf("unexpected article title: %s", article.Title)
 	}
 
-	// Toplanan haber uzerindeki puanlama dogrulama:
-	// TR-Focus (+50) + Fortinet (+30) + CVE-2024-9999 (+35) + Zero-Day (+20) = 135
+	// Cumulative scoring check:
+	// TR-Focus (50) + Fortinet (30) + CVE-2024-9999 (35) + Zero-Day (20) = 135
 	if article.Score < 135 {
 		t.Errorf("expected score >= 135, got %d (tags: %v)", article.Score, article.Tags)
 	}
@@ -91,7 +91,7 @@ func TestCollectorWithMockFeed(t *testing.T) {
 		}
 	}
 
-	// IoC çıkarımı doğrulaması
+	// Verify IoC extraction
 	if len(article.IoCs) < 2 {
 		t.Errorf("expected at least 2 IoCs extracted from feed, got %d", len(article.IoCs))
 	}

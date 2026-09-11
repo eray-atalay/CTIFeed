@@ -30,7 +30,7 @@ func TestExtractIoCs(t *testing.T) {
 		foundMap[item.Type+":"+item.Value] = true
 	}
 
-	// 1. Beklenen gerçek IoC'ler bulunmalı
+	// Verify extracted malicious IoCs
 	expected := []struct {
 		iocType string
 		val     string
@@ -50,7 +50,7 @@ func TestExtractIoCs(t *testing.T) {
 		}
 	}
 
-	// 2. Filtrelenmesi gereken meşru/özel adresler ve düz (defang edilmemiş) mağdur domainleri ÇIKMAMALI
+	// Verify whitelisted and non-defanged domains are excluded
 	prohibited := []struct {
 		iocType string
 		val     string

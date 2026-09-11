@@ -20,7 +20,7 @@ import (
 	"ctifeed/web"
 )
 
-// Server, HTTP web arayüzü ve REST API uç noktalarını koordine eder.
+// Server coordinates HTTP web endpoints and REST API routes.
 type Server struct {
 	cfg       *config.Config
 	db        *storage.DB
@@ -32,7 +32,7 @@ type Server struct {
 	server *http.Server
 }
 
-// NewServer, yeni bir API ve Web sunucusu örneği oluşturur.
+// NewServer creates and initializes a new Server instance.
 func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, addr string) *Server {
 	s := &Server{
 		cfg:       cfg,
@@ -42,7 +42,7 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 
 	mux := http.NewServeMux()
 
-	// REST API Yönlendirmeleri
+	// REST API routes
 	mux.HandleFunc("GET /api/stats", s.handleGetStats)
 	mux.HandleFunc("GET /api/analytics", s.handleGetAnalytics)
 	mux.HandleFunc("GET /api/iocs", s.handleGetIoCs)
@@ -51,7 +51,7 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	mux.HandleFunc("GET /api/articles", s.handleGetArticles)
 	mux.HandleFunc("POST /api/scan", s.handlePostScan)
 
-	// Gömülü web.Assets üzerinden Statik Varlık Sunucusu (Astro Dist)
+	// Static asset file server from embedded assets
 	staticFS, err := fs.Sub(web.Assets, "dist")
 	if err != nil {
 		slog.Error("Failed to create static sub-FS", slog.String("error", err.Error()))
@@ -67,31 +67,31 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Mevcut haberler için arka planda tek seferlik IoC indeksi oluştur
+	// One-time background IoC index backfill for existing articles
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if count, err := db.BackfillIoCs(ctx, ioc.Extract); err == nil && count > 0 {
-			slog.Info("Mevcut haberler icin IoC indeksi olusturuldu", slog.Int("extracted_iocs", count))
+			slog.Info("IoC index backfill completed", slog.Int("extracted_iocs", count))
 		}
 	}()
 
 	return s
 }
 
-// SetNotifier, bot veya alert mekanizmasını sunucuya bağlar.
+// SetNotifier registers an alert dispatcher.
 func (s *Server) SetNotifier(n interface {
 	DispatchAlert(ctx context.Context, articles []*model.Article)
 }) {
 	s.notifier = n
 }
 
-// Start, HTTP sunucusunu dinlemeye başlatır.
+// Start begins listening and serving HTTP requests.
 func (s *Server) Start() error {
 	return s.server.ListenAndServe()
 }
 
-// Shutdown, sunucuyu zarif bir şekilde (graceful) durdurur.
+// Shutdown gracefully stops the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
@@ -111,7 +111,6 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// handleGetStats, tehdit istihbaratı özet sayılarını döndürür.
 func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.db.GetStats(r.Context())
 	if err != nil {
@@ -123,7 +122,6 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(stats)
 }
 
-// handleGetAnalytics, analitik ve grafik verilerini döndürür.
 func (s *Server) handleGetAnalytics(w http.ResponseWriter, r *http.Request) {
 	analytics, err := s.db.GetAnalytics(r.Context())
 	if err != nil {
@@ -135,7 +133,6 @@ func (s *Server) handleGetAnalytics(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(analytics)
 }
 
-// handleGetIoCs, filtrelenebilir IoC listesini döndürür.
 func (s *Server) handleGetIoCs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
@@ -167,7 +164,6 @@ func (s *Server) handleGetIoCs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleExportIoCs, IoC listesini TXT veya CSV formatında dosya olarak indirir.
 func (s *Server) handleExportIoCs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	iocType := q.Get("type")
@@ -194,7 +190,6 @@ func (s *Server) handleExportIoCs(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// handleGetSources, yapılandırılmış CTI besleme kaynakları listesini döndürür.
 func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{
 		"count":   len(s.cfg.Sources),
@@ -205,7 +200,6 @@ func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// handleGetArticles, filtrelenmiş ve sayfalanmış tehdit istihbaratı haberlerini döndürür.
 func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
@@ -246,7 +240,6 @@ func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// handlePostScan, istek üzerine anlık besleme toplama döngüsünü tetikler.
 func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
 	if !s.scanMu.TryLock() {
 		w.Header().Set("Content-Type", "application/json")
@@ -295,7 +288,7 @@ func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// TriggerScan, harici tetikleyiciler için tüm beslemeleri tarar ve sonuçları kaydeder.
+// TriggerScan runs a complete collection cycle and saves new articles to storage.
 func (s *Server) TriggerScan(ctx context.Context) (int, int, error) {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()

@@ -1,3 +1,4 @@
+// Package config provides application-wide configuration structures and defaults.
 package config
 
 import (
@@ -6,7 +7,7 @@ import (
 	"ctifeed/internal/model"
 )
 
-// Config, uygulama yapılandırma ayarlarını temsil eder.
+// Config represents runtime configuration options.
 type Config struct {
 	Sources       []model.FeedSource
 	DBPath        string
@@ -18,10 +19,10 @@ type Config struct {
 	TopArticles   int
 	MinScore      int
 	UserAgent     string
-	TelegramToken string // Burayı ekle
+	TelegramToken string
 }
 
-// DefaultSources, önceden tanımlanmış 18 CTI tehdit besleme kaynağını döndürür.
+// DefaultSources returns the pre-configured CTI threat feed sources.
 func DefaultSources() []model.FeedSource {
 	return []model.FeedSource{
 		{Name: "The Hacker News", URL: "https://feeds.feedburner.com/TheHackersNews", Category: "General Security"},
@@ -47,12 +48,12 @@ func DefaultSources() []model.FeedSource {
 		{Name: "CrowdStrike Blog", URL: "https://www.crowdstrike.com/en-us/blog/feed", Category: "Threat Research & Adversaries"},
 		{Name: "ESET WeLiveSecurity", URL: "https://www.welivesecurity.com/en/rss/feed/", Category: "APT & Malware Research"},
 		{Name: "Red Canary Blog", URL: "https://redcanary.com/blog/feed/", Category: "Threat Research & Detection"},
-		{Name: "Telegram: cveNotify", URL:"telegram://cveNotify",Category: "Telegram CVE",},
-		{Name: "Telegram: breachdetect", URL:"telegram://breachdetect?latest=1281687", Category: "Telegram Breach",},
+		{Name: "Telegram: cveNotify", URL: "telegram://cveNotify", Category: "Telegram CVE"},
+		{Name: "Telegram: breachdetect", URL: "telegram://breachdetect?latest=1281687", Category: "Telegram Breach"},
 	}
 }
 
-// NewDefaultConfig, varsayılan çalışma yapılandırmasını oluşturur.
+// NewDefaultConfig initializes the default configuration settings.
 func NewDefaultConfig() *Config {
 	return &Config{
 		Sources:       DefaultSources(),
@@ -65,6 +66,6 @@ func NewDefaultConfig() *Config {
 		TopArticles:   10,
 		MinScore:      0,
 		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-		TelegramToken: "", // Burayı ekle
+		TelegramToken: "",
 	}
 }

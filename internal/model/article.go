@@ -1,15 +1,16 @@
+// Package model defines core data models for threat intelligence articles and IoCs.
 package model
 
 import "time"
 
-// FeedSource, siber tehdit istihbaratı için bir RSS/Atom besleme kaynağını temsil eder.
+// FeedSource represents an RSS/Atom or Telegram feed endpoint.
 type FeedSource struct {
 	Name     string `json:"name"`
 	URL      string `json:"url"`
 	Category string `json:"category,omitempty"`
 }
 
-// Article, toplanmış ve analiz edilmiş bir CTI haberini veya güvenlik uyarısını temsil eder.
+// Article represents an ingested and analyzed cyber threat intelligence item.
 type Article struct {
 	ID          int64     `json:"id"`
 	Source      string    `json:"source"`
@@ -23,9 +24,9 @@ type Article struct {
 	IoCs        []IoC     `json:"iocs,omitempty"`
 }
 
-// ScoringResult, hesaplanan puanı, eşleşen etiketleri ve puanlama detay dağılımını içerir.
+// ScoringResult contains the computed threat score, matching tags, and score breakdown.
 type ScoringResult struct {
-	Score     int               `json:"score"`
-	Tags      []string          `json:"tags"`
-	Breakdown map[string]int    `json:"breakdown"`
+	Score     int            `json:"score"`
+	Tags      []string       `json:"tags"`
+	Breakdown map[string]int `json:"breakdown"`
 }

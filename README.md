@@ -1,26 +1,30 @@
-# CTIFeed - Siber Tehdit İstihbaratı (CTI) RSS Toplayıcı & Önceliklendirme Motoru
+# CTIFeed - Cyber Threat Intelligence (CTI) Aggregator & ThreatRadar
 
-**CTIFeed**, siber tehdit istihbaratı (Cyber Threat Intelligence - CTI) kaynaklarından RSS/Atom beslemelerini eşzamanlı toplayan, içerikleri analiz ederek Türkiye odağı, kritik ürün zafiyetleri (CVE/Fortinet/WordPress vb.) ve tehdit aktörlerine göre dinamik skorlayan, mükerrer kayıtları engelleyen ve SQLite veritabanında depolayan, Astro tabanlı web arayüzüne sahip, üretime hazır (production-ready) bir Go uygulamasıdır.
+**CTIFeed**, siber tehdit istihbaratı (Cyber Threat Intelligence) kaynaklarından RSS/Atom beslemelerini ve Telegram kanallarını eşzamanlı toplayan, içerikleri kural tabanlı dinamik puanlama motoruyla önceliklendiren, haberlerden otomatik Tehdit Göstergeleri (IoC) çıkaran ve modern Astro web arayüzü sunan Go tabanlı bir CTI platformudur.
 
 ---
 
-## Ozellikler
+## Özellikler
 
-- **Astro Web Arayuzu:** Modern, koyu temali, hizli ve moduler Astro bilesenleri.
-- **Sifir Emoji Standarti:** Gerek kodlarda gerekse arayuzde emoji yerine profesyonel SVG vektor ikonlar ve net tipografi kullanilmistir.
-- **Tamamen Turkce Arayuz:** Tum metrikler, filtreler, arama kutulari ve modal pencereler Turkcedir.
-- **Eszamanli Veri Toplama (Worker Pool):** Ayarlanabilir eszamanli worker havuzu (goroutines) ve her istek icin context.WithTimeout korumasi (varsayilan 10s).
-- **18 On Tanimli Guvenilir CTI Kaynagi:** The Hacker News, BleepingComputer, SecurityWeek, Unit 42, Cisco Talos, The DFIR Report, Securelist, Dark Reading, Microsoft Threat Intelligence, Krebs on Security ve daha fazlasi.
-- **Son 48 Saat Filtresi:** Sadece son 48 saat icerisinde yayimlanmis guncel tehdit haberleri islenir, eski kayitlar elenir.
-- **Dinamik Skorlama Motoru (Cumulative Scoring):**
-  - **Turkiye Odagi (+50 Puan):** turkey, turkiye, turkish, turk, usom, btk, ankara, istanbul tespiti -> TR-Focus etiketi.
-  - **Kritik Urun/Servis Zafiyetleri (+30 Puan):** fortinet, fortios, wordpress, palo alto, cisco, ivanti, vmware, exchange, active directory tespiti.
-  - **Regex Tabanli CVE Tespiti (+35 Puan):** (?i)\bCVE-\d{4}-\d{4,7}\b regex kalibiyla otomatik ayiklama ve etiketleme.
-  - **Kritik Tehdit Vektorleri (+20 Puan):** zero-day, 0-day, rce, ransomware, data breach, leak, apt tespiti.
-- **Mukerrer Kayit Engelleme (Deduplication):** SQLite uzerinde link bazli UNIQUE indeks ve INSERT OR IGNORE mekanizmasi.
-- **Saf Go SQLite Surucusu (Pure Go / CGO-Free):** Windows ve diger isletim sistemlerinde harici C derleyicisine (GCC/MinGW) ihtiyac duymadan dogrudan derlenebilen modernc.org/sqlite altyapisi.
-- **Zamanlayici (Daemon Modu):** Arka planda periyodik araliklarla (or. her 15 dakikada bir) otomatik tarama.
-- **Zarif Kapanma (Graceful Shutdown):** SIGINT (Ctrl+C) veya SIGTERM sinyallerinde devam eden islemleri ve veritabani baglantilarini guvenle sonlandirma.
+- **Modern Web Dashboard:** Astro ve TypeScript ile geliştirilmiş, gömülü (`go:embed`) varlıklarla tek bir binary olarak çalışan koyu temalı arayüz.
+- **Eşzamanlı Veri Toplama (Worker Pool):** Ayarlanabilir worker havuzu (goroutines) ve her istek için `context.WithTimeout` koruması.
+- **25 Güvenilir CTI Kaynağı:** The Hacker News, BleepingComputer, SecurityWeek, Unit 42, Cisco Talos, The DFIR Report, Securelist, Dark Reading, Microsoft Threat Intelligence, Krebs on Security, ANY.RUN, CrowdStrike ve Telegram kanalları (cveNotify, breachdetect).
+- **Dinamik Önceliklendirme Motoru (Cumulative Scoring):**
+  - **TR-Focus (+50 Puan):** Türkiye kurumları, kritik altyapı ve regülatör (USOM, BTK, BDDK vb.) referansları.
+  - **Regex Tabanlı CVE Tespiti (+35 Puan):** `(?i)\bCVE-\d{4}-\d{4,7}\b` kalıbıyla otomatik ayıklama ve etiketleme.
+  - **Kritik Ürün ve Servisler (+30 Puan):** Fortinet, Palo Alto, Cisco, Ivanti, VMware, Exchange, Active Directory vb.
+  - **Aktif Sömürü ve PoC (+25 Puan):** In-the-wild, CISA KEV ve PoC tespitleri.
+  - **Kritik Tehdit Vektörleri (+20 Puan):** Zero-day, RCE, auth-bypass, ransomware, data breach vb.
+- **Otomatik IoC Çıkarımı ve Dışa Aktarma:**
+  - IPv4, Alan Adı (Domain), SHA256 ve MD5 hash tespiti.
+  - Yanlış pozitifleri önlemek için defang edilmiş format (`evil[.]com`, `hxxps://`) ayrıştırma ve beyaz liste doğrulaması.
+  - Firewall/EDR entegrasyonları için TXT veya CSV blok listesi olarak dışa aktarım (`/api/iocs/export`).
+- **Telegram Bot Entegrasyonu:**
+  - Gerçek zamanlı kritik tehdit bildirimleri (`/start`, `/kapsam`, `/filtre`).
+  - Kategori ve zaman aralığına göre dinamik filtre menüsü.
+- **Analitik Grafikler ve Trendler:** Kaynak dağılımı, haftalık saldırı zaman çizelgesi ve hedeflenen kurumsal teknolojiler.
+- **Pure Go SQLite (CGO-Free):** Harici C derleyicisine ihtiyaç duymadan doğrudan derlenebilen `modernc.org/sqlite` altyapısı.
+- **Graceful Shutdown:** SIGINT/SIGTERM sinyallerinde veritabanı ve arka plan işlerini temiz sonlandırma.
 
 ---
 
@@ -29,31 +33,26 @@
 ```
 CTIFeed/
 ├── cmd/
-│   └── ctifeed/
-│       └── main.go           # CLI / Web sunucu baslatici, graceful shutdown
-├── frontend/                 # Astro tabanli modern web arayuzu
-│   ├── src/
-│   │   ├── components/       # Header, Metrics, Toolbar, FeedGrid, Modals
-│   │   ├── layouts/          # Layout.astro
-│   │   ├── pages/            # index.astro
-│   │   └── styles/           # global.css (Mat SOC temasi)
-│   ├── public/               # app.js, global.css
+│   └── ctifeed/              # CLI / Web sunucu giriş noktası
+├── frontend/                 # Astro tabanlı modern web arayüzü
+│   ├── src/                  # Bileşenler, sayfalar, stiller
 │   └── astro.config.mjs
 ├── internal/
 │   ├── api/                  # REST API ve statik dosya sunucusu
-│   ├── config/               # 18 CTI kaynagi ve yapilandirma
-│   ├── model/                # Article, FeedSource veri modelleri
-│   ├── scorer/               # Puanlama motoru, CVE regex
-│   ├── collector/            # Worker pool, gofeed toplayici
-│   └── storage/              # SQLite veritabani katmani (modernc.org/sqlite)
-├── web/                      # Gomulu statik uretim varliklari (embed.FS)
-├── bin/
-│   └── ctifeed.exe           # Derlenmis calistirilabilir uygulama
-├── Dockerfile                # Cok asamali (multi-stage) uretim imaji
-├── docker-compose.yml        # Docker Compose servis tanimi
-├── .dockerignore             # Docker derleme filtreleri
+│   ├── collector/            # RSS/Atom ve Telegram toplayıcı
+│   ├── config/               # Besleme kaynakları ve yapılandırma
+│   ├── ioc/                  # Regex ve defang tabanlı IoC çıkarıcı
+│   ├── model/                # Veri modelleri (Article, IoC)
+│   ├── notifier/             # Telegram bot ve bildirim mekanizması
+│   ├── scorer/               # Önceliklendirme ve puanlama motoru
+│   └── storage/              # SQLite depolama ve analitik sorguları
+├── web/                      # Gömülü statik varlıklar (embed.FS)
+├── Dockerfile                # Multi-stage Docker imajı
+├── docker-compose.yml        # Compose servis tanımı
+├── .env.example              # Örnek ortam değişkenleri
 ├── go.mod
 ├── go.sum
+├── LICENSE                   # MIT Lisansı
 └── README.md
 ```
 
@@ -62,92 +61,88 @@ CTIFeed/
 ## Kurulum ve Derleme
 
 ### Gereksinimler
-- Go 1.22 veya uzeri
-- Node.js v18+ (Astro arayuzunu yeniden derlemek icin)
+- Go 1.22+
+- Node.js 18+ (Astro arayüzünü derlemek için)
 
-### Derleme
+### Derleme Adımları
+
 ```bash
-# 1. Astro arayuzunu derleme:
+# 1. Frontend varlıklarını derleyin:
 cd frontend
 npm install
 npm run build
 cd ..
 
-# 2. Go binary dosyasini derleme:
-go build -o bin/ctifeed.exe ./cmd/ctifeed
+# 2. Go binary dosyasını derleyin:
+go build -o bin/ctifeed ./cmd/ctifeed
 ```
 
 ---
 
-## Kullanim Kilavuzu
+## Kullanım
 
-### 1. Web Dashboard Arayuzu (Varsayilan)
+### 1. Web Dashboard (Varsayılan)
+
 ```bash
-.\bin\ctifeed.exe
+./bin/ctifeed
 ```
-Tarayicinizda acin:
+
+Tarayıcınızda açın:
 `http://localhost:8080`
 
-- **Farkli bir port belirlemek icin:**
+Farklı bir port kullanmak için:
 ```bash
-.\bin\ctifeed.exe -port 3000
+./bin/ctifeed -port 3000
 ```
 
-### 2. Docker ile Calistirma (Onerilen)
+### 2. Docker ile Çalıştırma
 
-#### Docker Compose ile Tek Komutla Baslatma:
 ```bash
 docker compose up -d
 ```
-Veritabani yerel `./data/` dizininde otomatik kalici olarak saklanir ve `http://localhost:8081` (veya compose dosyasinda tanimlanan port) uzerinden erisilebilir.
 
-- **Loglari izlemek icin:**
-```bash
-docker compose logs -f
-```
+Uygulama `http://localhost:8081` adresinde çalışır ve SQLite veritabanı `./data` dizininde kalıcı olarak saklanır.
 
-- **Durdurmak icin:**
-```bash
-docker compose down
-```
+### 3. CLI Terminal Modu
 
-#### Manuel Docker Derleme ve Calistirma:
-```bash
-docker build -t ctifeed:latest .
-docker run -d --name ctifeed-app -p 8080:8080 -v ${PWD}/data:/data ctifeed:latest
-```
+Web arayüzü yerine terminal üzerinde özet rapor almak için `-cli` bayrağı kullanılabilir:
 
-### 3. Terminal / CLI Modu
-Eger web arayuzu yerine yalnizca konsol raporu almak isterseniz `-cli` parametresini kullanabilirsiniz:
 ```bash
-.\bin\ctifeed.exe -cli -top 10 -min-score 50
+./bin/ctifeed -cli -top 10 -min-score 50
 ```
 
 ---
 
-## REST API Uc Noktalari
+## REST API Uç Noktaları
 
-Uygulama arka planda tam donanimli bir RESTful API sunar:
-
-| Metot | Uc Nokta | Aciklama | Parametreler |
-|---|---|---|---|
-| `GET` | `/api/stats` | Toplam haber, yuksek oncelikli, CVE ve Turkiye odakli haber sayilari | Yok |
-| `GET` | `/api/sources` | Taranan 18 siber tehdit besleme kaynaginin listesi | Yok |
-| `GET` | `/api/articles` | Filtrelenmis ve sayfalanmis tehdit haberleri | `search`, `tag`, `source`, `min_score`, `sort`, `limit`, `offset` |
-| `POST`| `/api/scan` | Anlik/istek uzerine CTI tarama dongusunu tetikler | Yok |
+| Metot | Uç Nokta | Açıklama |
+|---|---|---|
+| `GET` | `/api/stats` | Toplam makale, yüksek öncelikli, CVE ve TR-Focus sayıları |
+| `GET` | `/api/analytics` | Kaynak payları, aktivite zaman çizelgesi, popüler etiketler |
+| `GET` | `/api/articles` | Filtrelenmiş ve sayfalanmış haberler (`search`, `tag`, `source`, `min_score`, `time_range`, `limit`, `offset`) |
+| `GET` | `/api/iocs` | Tespit edilen IoC listesi (`type`, `search`, `article_id`, `limit`, `offset`) |
+| `GET` | `/api/iocs/export` | IoC blok listesi indirme (`type=ip\|domain\|sha256`, `format=txt\|csv`) |
+| `GET` | `/api/sources` | Taranan besleme kaynaklarının listesi |
+| `POST`| `/api/scan` | Anlık tarama döngüsünü tetikler |
 
 ---
 
-## Komut Satiri Parametreleri (CLI Flags)
+## Yapılandırma Seçenekleri
 
-| Parametre | Tip | Varsayilan | Aciklama |
+| Bayrak | Ortam Değişkeni | Varsayılan | Açıklama |
 |---|---|---|---|
-| `-port` | `string` | `8080` | Web Dashboard HTTP portu |
-| `-cli` | `bool` | `false` | Web arayuzu yerine konsol modunda calistirir |
-| `-interval` | `duration` | `15m` | Taramalar arasindaki periyot (or. 15m, 1h) |
-| `-workers` | `int` | `5` | Eszamanli calisacak worker sayisi |
-| `-timeout` | `duration` | `10s` | Besleme istekleri icin timeout suresi |
-| `-db` | `string` | `ctifeed.db` | SQLite veritabani dosya yolu |
-| `-top` | `int` | `10` | Konsol modunda listelenecek haber adedi |
-| `-min-score`| `int` | `0` | Listeleme icin gereken minimum skor filtresi |
-| `-verbose` | `bool` | `false` | Detayli debug loglarini gosterir |
+| `-port` | `PORT` | `8080` | Web sunucu portu |
+| `-cli` | - | `false` | CLI konsol modunu etkinleştirir |
+| `-interval` | `INTERVAL` | `15m` | Otomatik tarama periyodu |
+| `-workers` | `WORKERS` | `5` | Eşzamanlı worker sayısı |
+| `-timeout` | `TIMEOUT` | `10s` | İstek zaman aşımı süresi |
+| `-db` | `DB_PATH` | `ctifeed.db` | SQLite veritabanı dosya yolu |
+| `-max-age` | `MAX_AGE` | `168h` | İşlenecek makalelerin azami yaşı |
+| `-telegram-token` | `TELEGRAM_BOT_TOKEN` | `""` | Telegram Bot API Token |
+| `-verbose` | - | `false` | Detaylı debug logları |
+
+---
+
+## Lisans
+
+Bu proje [MIT](LICENSE) lisansı altında sunulmaktadır.

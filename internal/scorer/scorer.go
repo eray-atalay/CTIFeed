@@ -10,13 +10,13 @@ import (
 )
 
 var (
-	// cveRegex, standart CVE kimliklerini eşleştiren düzenli ifadedir.
+	// cveRegex matches standard CVE identifiers.
 	cveRegex = regexp.MustCompile(`(?i)\bCVE-\d{4}-\d{4,7}\b`)
-	// htmlTagRegex, özet metinlerdeki HTML etiketlerini ayıklar.
+	// htmlTagRegex strips HTML tags from feed summary descriptions.
 	htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
 )
 
-// Türkiye odağı için taranacak anahtar kelimeler ve kurumlar (büyük/küçük harf duyarsız kontrol edilir)
+// Keywords and institutions for TR-Focus evaluation
 var turkeyKeywords = []string{
 	"turkey",
 	"türkiye",
@@ -51,7 +51,7 @@ var turkeyKeywords = []string{
 	"bist",
 }
 
-// Aktif İstismar ve PoC (In-the-Wild / Exploit) göstergeleri (+25 Puan)
+// Active exploitation and PoC indicators (+25 points)
 var activeExploitation = map[string]string{
 	"actively exploited": "in-the-wild",
 	"in the wild":        "in-the-wild",
@@ -68,7 +68,7 @@ var activeExploitation = map[string]string{
 	"known exploited":    "in-the-wild",
 }
 
-// Kritik kurumsal servis, ağ cihazı ve ürünler ile kanonik etiket adları (+30 Puan)
+// Enterprise products, infrastructure, and services (+30 points)
 var criticalProducts = map[string]string{
 	// Ağ ve Güvenlik Çevresi (Firewall / VPN / Gateway)
 	"fortinet":    "fortinet",
@@ -109,7 +109,7 @@ var criticalProducts = map[string]string{
 	"wordpress":        "wordpress",
 }
 
-// Kritik tehdit vektörleri ve kanonik etiket adları (+20 Puan)
+// Threat vectors and techniques (+20 points)
 var threatVectors = map[string]string{
 	// Kod Çalıştırma ve Yetki
 	"zero-day":              "zero-day",
@@ -140,18 +140,16 @@ var threatVectors = map[string]string{
 	"sqli":         "sqli",
 }
 
-// StripHTML, metin içerisindeki HTML etiketlerini ve özel karakter kodlamalarını temizler.
+// StripHTML strips HTML markup and unescapes entities.
 func StripHTML(input string) string {
-	// Paragraf, başlık ve satır sonu gibi blok etiketlerini boşluk ile değiştir
 	blockRegex := regexp.MustCompile(`(?i)</?(?:p|div|br|h[1-6]|li|tr|blockquote)[^>]*>`)
 	text := blockRegex.ReplaceAllString(input, " ")
-	// Kalan tüm diğer etiketleri temizle
 	text = htmlTagRegex.ReplaceAllString(text, "")
 	text = html.UnescapeString(text)
 	return strings.TrimSpace(strings.Join(strings.Fields(text), " "))
 }
 
-// Evaluate, haberin başlık ve özetini analiz ederek kümülatif tehdit/öncelik puanını hesaplar ve ilgili etiketleri atar.
+// Evaluate analyzes title and summary to calculate cumulative threat score and assign tags.
 func Evaluate(title, summary string) model.ScoringResult {
 	combined := strings.ToLower(title + " " + summary)
 
@@ -159,7 +157,7 @@ func Evaluate(title, summary string) model.ScoringResult {
 	tagSet := make(map[string]struct{})
 	breakdown := make(map[string]int)
 
-	// 1. Türkiye Odağı (+50 Puan)
+	// Turkey Focus (+50)
 	hasTR := false
 	for _, kw := range turkeyKeywords {
 		if containsWordOrPhrase(combined, kw) {
@@ -173,7 +171,7 @@ func Evaluate(title, summary string) model.ScoringResult {
 		breakdown["TR-Focus"] = 50
 	}
 
-	// 2. Regex Tabanlı CVE Tespiti (+35 Puan)
+	// CVE Identification (+35)
 	rawCVEs := cveRegex.FindAllString(title+" "+summary, -1)
 	if len(rawCVEs) > 0 {
 		score += 35
@@ -184,7 +182,7 @@ func Evaluate(title, summary string) model.ScoringResult {
 		breakdown["CVE-Detected"] = 35
 	}
 
-	// 3. Kritik Kurumsal Servis/Ürün Zafiyetleri (+30 Puan)
+	// Critical Enterprise Products (+30)
 	matchedProducts := make(map[string]struct{})
 	for kw, canonicalTag := range criticalProducts {
 		if containsWordOrPhrase(combined, kw) {
@@ -199,7 +197,7 @@ func Evaluate(title, summary string) model.ScoringResult {
 		breakdown["Critical-Products"] = 30
 	}
 
-	// 4. Aktif Sömürü ve PoC Göstergeleri (+25 Puan)
+	// Active Exploitation / PoC (+25)
 	matchedExploits := make(map[string]struct{})
 	for kw, canonicalTag := range activeExploitation {
 		if containsWordOrPhrase(combined, kw) {
@@ -214,7 +212,7 @@ func Evaluate(title, summary string) model.ScoringResult {
 		breakdown["Active-Exploitation"] = 25
 	}
 
-	// 5. Kritik Tehdit Vektörleri (+20 Puan)
+	// Threat Vectors (+20)
 	matchedVectors := make(map[string]struct{})
 	for kw, canonicalTag := range threatVectors {
 		if containsWordOrPhrase(combined, kw) {
@@ -243,7 +241,6 @@ func Evaluate(title, summary string) model.ScoringResult {
 	}
 }
 
-// containsWordOrPhrase, kelime öbeği veya kelime sınırı kurallarına göre metin eşleşmesi yapar.
 func containsWordOrPhrase(text, target string) bool {
 	// Çoklu kelime öbeklerinde (ör. "palo alto", "active directory", "in the wild") doğrudan arama yapılır
 	if strings.Contains(target, " ") || strings.Contains(target, "-") {

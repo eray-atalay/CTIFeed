@@ -169,9 +169,6 @@ export default function ArticleModal() {
                   if (t === 'TR-Focus') {
                     return <span key={t} class="tag-item tag-tr">{t}</span>;
                   }
-                  if (t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation') {
-                    return <span key={t} class="tag-item tag-exploit">{t}</span>;
-                  }
                   return <span key={t} class="tag-item">{t}</span>;
                 })
               ) : (

@@ -1,18 +1,43 @@
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: ctifeed-mysql
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: ctifeed
+      MYSQL_USER: ctifeed
+      MYSQL_PASSWORD: ctifeed_secret
+      MYSQL_ROOT_PASSWORD: root_secret
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uctifeed", "-pctifeed_secret"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   ctifeed:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: ctifeed-radar
     restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
     ports:
       - "8081:8080"
-    volumes:
-      # Persist SQLite database in local ./data directory
-      - ./data:/data
     environment:
       - PORT=8080
-      - DB_PATH=/data/ctifeed.db
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=ctifeed
+      - DB_PASSWORD=ctifeed_secret
+      - DB_NAME=ctifeed
       - INTERVAL=15m
       - WORKERS=5
       - TIMEOUT=10s
@@ -24,3 +49,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  mysql_data:

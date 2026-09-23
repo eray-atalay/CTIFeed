@@ -42,7 +42,12 @@ func main() {
 	flag.DurationVar(&cfg.Interval, "interval", 15*time.Minute, "Polling interval for periodic feed scanning (e.g. 15m, 1h)")
 	flag.IntVar(&cfg.Workers, "workers", 5, "Number of concurrent workers for feed fetching")
 	flag.DurationVar(&cfg.Timeout, "timeout", 10*time.Second, "Timeout per feed fetch request")
-	flag.StringVar(&cfg.DBPath, "db", "ctifeed.db", "Path to SQLite database file")
+	flag.StringVar(&cfg.MySQLDSN, "dsn", "", "MySQL DSN connection string (e.g. user:password@tcp(host:3306)/dbname?parseTime=true)")
+	flag.StringVar(&cfg.DBHost, "db-host", "127.0.0.1", "MySQL host")
+	flag.StringVar(&cfg.DBPort, "db-port", "3306", "MySQL port")
+	flag.StringVar(&cfg.DBUser, "db-user", "ctifeed", "MySQL username")
+	flag.StringVar(&cfg.DBPassword, "db-password", "ctifeed_secret", "MySQL password")
+	flag.StringVar(&cfg.DBName, "db-name", "ctifeed", "MySQL database name")
 	flag.IntVar(&cfg.TopArticles, "top", 10, "Number of top-priority articles to display in CLI report")
 	flag.DurationVar(&cfg.MaxAgeHours, "max-age", 7*24*time.Hour, "Maximum age for articles to process (e.g. 48h, 168h)")
 	flag.IntVar(&cfg.MinScore, "min-score", 0, "Minimum score filter for CLI report display")
@@ -57,8 +62,25 @@ func main() {
 	if envPort := os.Getenv("PORT"); envPort != "" && *port == "8080" {
 		*port = envPort
 	}
-	if envDB := os.Getenv("DB_PATH"); envDB != "" && cfg.DBPath == "ctifeed.db" {
-		cfg.DBPath = envDB
+	if envDSN := os.Getenv("MYSQL_DSN"); envDSN != "" {
+		cfg.MySQLDSN = envDSN
+	} else if envDSN := os.Getenv("DB_DSN"); envDSN != "" {
+		cfg.MySQLDSN = envDSN
+	}
+	if envHost := os.Getenv("DB_HOST"); envHost != "" {
+		cfg.DBHost = envHost
+	}
+	if envPortDB := os.Getenv("DB_PORT"); envPortDB != "" {
+		cfg.DBPort = envPortDB
+	}
+	if envUser := os.Getenv("DB_USER"); envUser != "" {
+		cfg.DBUser = envUser
+	}
+	if envPass := os.Getenv("DB_PASSWORD"); envPass != "" {
+		cfg.DBPassword = envPass
+	}
+	if envName := os.Getenv("DB_NAME"); envName != "" {
+		cfg.DBName = envName
 	}
 	if envInterval := os.Getenv("INTERVAL"); envInterval != "" {
 		if d, err := time.ParseDuration(envInterval); err == nil {
@@ -93,15 +115,17 @@ func main() {
 
 	fmt.Print(banner)
 
-	// Initialize storage
-	db, err := storage.NewDB(cfg.DBPath)
+	// Initialize MySQL storage
+	dsn := cfg.GetDSN()
+	slog.Info("Connecting to MySQL database", slog.String("host", cfg.DBHost), slog.String("database", cfg.DBName))
+	db, err := storage.NewDB(dsn)
 	if err != nil {
-		slog.Error("Failed to initialize database", slog.String("error", err.Error()))
+		slog.Error("Failed to initialize MySQL database", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 	defer func() {
 		_ = db.Close()
-		slog.Info("Database connection closed cleanly")
+		slog.Info("MySQL database connection closed cleanly")
 	}()
 
 	col := collector.New(cfg)

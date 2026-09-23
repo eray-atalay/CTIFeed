@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,21 +10,27 @@ import (
 )
 
 func setupTestDB(t *testing.T) (*DB, func()) {
-	tmpDir, err := os.MkdirTemp("", "ctifeed_test_*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
+	dsn := os.Getenv("TEST_MYSQL_DSN")
+	if dsn == "" {
+		dsn = "ctifeed:ctifeed_secret@tcp(127.0.0.1:3306)/ctifeed?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=UTC"
 	}
 
-	dbPath := filepath.Join(tmpDir, "test.db")
-	db, err := NewDB(dbPath)
+	db, err := NewDB(dsn)
 	if err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to init db: %v", err)
+		t.Skipf("MySQL is not available (%v). Skipping integration test. (Run MySQL or set TEST_MYSQL_DSN)", err)
+		return nil, func() {}
 	}
+
+	ctx := context.Background()
+	_, _ = db.conn.ExecContext(ctx, "DELETE FROM iocs;")
+	_, _ = db.conn.ExecContext(ctx, "DELETE FROM user_subscriptions;")
+	_, _ = db.conn.ExecContext(ctx, "DELETE FROM articles;")
 
 	cleanup := func() {
+		_, _ = db.conn.ExecContext(ctx, "DELETE FROM iocs;")
+		_, _ = db.conn.ExecContext(ctx, "DELETE FROM user_subscriptions;")
+		_, _ = db.conn.ExecContext(ctx, "DELETE FROM articles;")
 		_ = db.Close()
-		_ = os.RemoveAll(tmpDir)
 	}
 
 	return db, cleanup
@@ -265,4 +270,3 @@ func TestSaveArticlesWithIoCs(t *testing.T) {
 		t.Fatalf("expected 2 iocs saved automatically, got count=%d, len=%d", count, len(iocs))
 	}
 }
-

@@ -136,7 +136,12 @@ Web arayüzü yerine terminal üzerinde özet rapor almak için `-cli` bayrağı
 | `-interval` | `INTERVAL` | `15m` | Otomatik tarama periyodu |
 | `-workers` | `WORKERS` | `5` | Eşzamanlı worker sayısı |
 | `-timeout` | `TIMEOUT` | `10s` | İstek zaman aşımı süresi |
-| `-db` | `DB_PATH` | `ctifeed.db` | SQLite veritabanı dosya yolu |
+| `-dsn` | `MYSQL_DSN` | `""` | MySQL DSN bağlantı dizesi |
+| `-db-host` | `DB_HOST` | `127.0.0.1` | MySQL sunucu adresi |
+| `-db-port` | `DB_PORT` | `3306` | MySQL sunucu portu |
+| `-db-user` | `DB_USER` | `ctifeed` | MySQL kullanıcı adı |
+| `-db-password` | `DB_PASSWORD` | `ctifeed_secret` | MySQL şifresi |
+| `-db-name` | `DB_NAME` | `ctifeed` | MySQL veritabanı adı |
 | `-max-age` | `MAX_AGE` | `168h` | İşlenecek makalelerin azami yaşı |
 | `-telegram-token` | `TELEGRAM_BOT_TOKEN` | `""` | Telegram Bot API Token |
 | `-verbose` | - | `false` | Detaylı debug logları |

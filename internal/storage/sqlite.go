@@ -456,8 +456,8 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 	}
 
 	if filter.Source != "" {
-		whereClauses = append(whereClauses, "source = ?")
-		args = append(args, filter.Source)
+		whereClauses = append(whereClauses, "(source = ? OR source LIKE ?)")
+		args = append(args, filter.Source, "%"+filter.Source+"%")
 	}
 
 	if filter.Tag != "" {
@@ -1022,4 +1022,34 @@ func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []mod
 	}
 
 	return totalExtracted, nil
+}
+
+// GetLatestTelegramPostID returns the highest numeric Telegram post ID stored for a source.
+func (d *DB) GetLatestTelegramPostID(ctx context.Context, source string) (int, error) {
+	rows, err := d.conn.QueryContext(ctx, `
+		SELECT link FROM articles 
+		WHERE source = ? OR source LIKE ? 
+		ORDER BY id DESC LIMIT 50;
+	`, source, source+"%")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	maxID := 0
+	for rows.Next() {
+		var link string
+		if err := rows.Scan(&link); err == nil {
+			idx := strings.LastIndex(link, "/")
+			if idx != -1 && idx < len(link)-1 {
+				var postID int
+				if _, err := fmt.Sscanf(link[idx+1:], "%d", &postID); err == nil {
+					if postID > maxID {
+						maxID = postID
+					}
+				}
+			}
+		}
+	}
+	return maxID, nil
 }

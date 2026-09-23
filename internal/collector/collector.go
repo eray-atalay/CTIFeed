@@ -21,10 +21,23 @@ import (
 	"ctifeed/internal/scorer"
 )
 
+// TelegramCursorProvider supplies the latest known post ID from persistent storage.
+type TelegramCursorProvider interface {
+	GetLatestTelegramPostID(ctx context.Context, source string) (int, error)
+}
+
 // Collector manages concurrent fetching and parsing of CTI feeds.
 type Collector struct {
 	cfg        *config.Config
 	httpClient *http.Client
+	cursorDB   TelegramCursorProvider
+	latestIDMu sync.Mutex
+	latestIDs  map[string]int
+}
+
+// SetCursorProvider attaches a persistent storage provider for tracking Telegram cursors.
+func (c *Collector) SetCursorProvider(provider TelegramCursorProvider) {
+	c.cursorDB = provider
 }
 
 // Result represents the aggregated outcome of a feed collection cycle.
@@ -82,6 +95,7 @@ func New(cfg *config.Config) *Collector {
 	return &Collector{
 		cfg:        cfg,
 		httpClient: client,
+		latestIDs:  make(map[string]int),
 	}
 }
 
@@ -185,30 +199,44 @@ func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, res
 	}
 }
 
-// fetchTelegramFeed parses public Telegram channel web previews.
+// fetchTelegramFeed parses public Telegram channel web previews or ID-based posts.
 func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
-	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(parentCtx, 45*time.Second)
 	defer cancel()
 
 	channelURL := src.URL
 	channelName := strings.TrimPrefix(channelURL, "telegram://")
 
-	// Eğer özel son ID parametresi varsa (Örn: breachdetect?latest=1281687)
-	if strings.Contains(channelName, "?latest=") {
-		parts := strings.Split(channelName, "?latest=")
-		ch := parts[0]
-		var latestID int
-		_, _ = fmt.Sscanf(parts[1], "%d", &latestID)
+	cleanCh := channelName
+	var seedID int
+	if strings.Contains(cleanCh, "?latest=") {
+		parts := strings.Split(cleanCh, "?latest=")
+		cleanCh = parts[0]
+		_, _ = fmt.Sscanf(parts[1], "%d", &seedID)
+	} else if strings.Contains(cleanCh, "?seed=") {
+		parts := strings.Split(cleanCh, "?seed=")
+		cleanCh = parts[0]
+		_, _ = fmt.Sscanf(parts[1], "%d", &seedID)
+	} else if strings.Contains(cleanCh, "?") {
+		cleanCh = cleanCh[:strings.Index(cleanCh, "?")]
+	}
 
+	cleanCh = strings.TrimPrefix(cleanCh, "https://t.me/s/")
+	cleanCh = strings.TrimPrefix(cleanCh, "http://t.me/s/")
+	cleanCh = strings.TrimPrefix(cleanCh, "https://t.me/")
+	cleanCh = strings.TrimPrefix(cleanCh, "http://t.me/")
+	cleanCh = strings.Trim(cleanCh, "/")
+
+	// Channels requiring ID-based scraping (e.g. breachdetect which redirects /s/ preview) or with seed/latest specified
+	if cleanCh == "breachdetect" || src.Category == "Telegram Breach" || seedID > 0 {
+		latestID := c.resolveLatestTelegramID(ctx, src, cleanCh, seedID)
 		if latestID > 0 {
-			return c.fetchTelegramByID(ctx, src, ch, latestID)
+			return c.fetchTelegramByID(ctx, src, cleanCh, latestID)
 		}
 	}
 
 	// Standard public channel preview
-	channelName = strings.TrimPrefix(channelName, "https://t.me/s/")
-	channelName = strings.TrimPrefix(channelName, "http://t.me/s/")
-	targetURL := fmt.Sprintf("https://t.me/s/%s", channelName)
+	targetURL := fmt.Sprintf("https://t.me/s/%s", cleanCh)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err != nil {
@@ -250,7 +278,7 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 			continue
 		}
 
-		link := fmt.Sprintf("https://t.me/%s/%d", channelName, i)
+		link := fmt.Sprintf("https://t.me/%s/%d", cleanCh, i)
 		if i < len(postLinks) {
 			link = "https://t.me/" + postLinks[i][1]
 		}
@@ -298,13 +326,176 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 	return articles, oldCnt, nil
 }
 
+func (c *Collector) resolveLatestTelegramID(ctx context.Context, src model.FeedSource, channel string, seedID int) int {
+	c.latestIDMu.Lock()
+	cachedID := c.latestIDs[channel]
+	c.latestIDMu.Unlock()
+
+	if cachedID > seedID {
+		seedID = cachedID
+	}
+
+	if c.cursorDB != nil {
+		if dbID, err := c.cursorDB.GetLatestTelegramPostID(ctx, src.Name); err == nil && dbID > seedID {
+			seedID = dbID
+		}
+	}
+
+	// Safe fallback baseline for breachdetect
+	if channel == "breachdetect" && seedID < 1286500 {
+		seedID = 1286500
+	}
+
+	latestID := c.probeLatestTelegramID(ctx, channel, seedID)
+	if latestID > 0 {
+		c.latestIDMu.Lock()
+		if latestID > c.latestIDs[channel] {
+			c.latestIDs[channel] = latestID
+		}
+		c.latestIDMu.Unlock()
+	}
+
+	return latestID
+}
+
+func isTelegramPostHTMLValid(body string) bool {
+	if strings.Contains(body, "tgme_page_additional") || strings.Contains(body, "You can view and join") {
+		return false
+	}
+	if strings.Contains(body, "Monitoring and detection of threats that occur through the main channels") {
+		return false
+	}
+	if strings.Contains(body, "widget_actions_helper") || strings.Contains(body, "widget_actions") {
+		return true
+	}
+	return false
+}
+
+func isTelegramPostContentValid(rawText string) bool {
+	if len(rawText) < 15 {
+		return false
+	}
+	if strings.HasPrefix(rawText, "You can view and join") {
+		return false
+	}
+	if strings.Contains(rawText, "Monitoring and detection of threats that occur through the main channels") {
+		return false
+	}
+	return true
+}
+
+func (c *Collector) checkTelegramPostExists(ctx context.Context, channel string, id int) bool {
+	postURL := fmt.Sprintf("https://t.me/%s/%d", channel, id)
+	req, err := http.NewRequestWithContext(ctx, "GET", postURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", c.cfg.UserAgent)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return false
+	}
+
+	return isTelegramPostHTMLValid(string(body))
+}
+
+func (c *Collector) probeLatestTelegramID(ctx context.Context, channel string, seedID int) int {
+	if seedID <= 0 {
+		seedID = 1286500
+	}
+
+	// 1. Verify if seed exists
+	if !c.checkTelegramPostExists(ctx, channel, seedID) {
+		low := seedID - 500
+		if low < 1 {
+			low = 1
+		}
+		if !c.checkTelegramPostExists(ctx, channel, low) {
+			return seedID
+		}
+		return c.binarySearchTelegramID(ctx, channel, low, seedID)
+	}
+
+	// 2. Exponential step forward to find upper bound
+	low := seedID
+	step := 10
+	high := low + step
+
+	for {
+		select {
+		case <-ctx.Done():
+			return low
+		default:
+		}
+
+		if c.checkTelegramPostExists(ctx, channel, high) {
+			low = high
+			step *= 2
+			high = low + step
+		} else {
+			break
+		}
+	}
+
+	// 3. Binary search between low and high
+	return c.binarySearchTelegramID(ctx, channel, low, high)
+}
+
+func (c *Collector) binarySearchTelegramID(ctx context.Context, channel string, low, high int) int {
+	best := low
+	for low <= high {
+		select {
+		case <-ctx.Done():
+			return best
+		default:
+		}
+
+		if low == high {
+			if c.checkTelegramPostExists(ctx, channel, low) {
+				return low
+			}
+			return best
+		}
+
+		mid := low + (high-low)/2
+		if mid == low {
+			if c.checkTelegramPostExists(ctx, channel, high) {
+				return high
+			}
+			return low
+		}
+
+		if c.checkTelegramPostExists(ctx, channel, mid) {
+			best = mid
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	return best
+}
+
 // fetchTelegramByID parses channel posts concurrently via OpenGraph meta tags.
 func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource, channel string, latestID int) ([]*model.Article, int, error) {
 	descRegex := regexp.MustCompile(`<meta property="og:description" content="([^"]+)"`)
 	contentRegex := regexp.MustCompile(`(?i)"Content":\s*"([^"]+)"`)
 	dateRegex := regexp.MustCompile(`(?i)"Detection Date":\s*"([^"]+)"`)
+	typeRegex := regexp.MustCompile(`(?i)"Type":\s*"([^"]+)"`)
+	sourceForumRegex := regexp.MustCompile(`(?i)"Source":\s*"([^"]+)"`)
+	authorRegex := regexp.MustCompile(`(?i)"author":\s*"([^"]+)"`)
 
-	totalPosts := 20
+	totalPosts := 30
 	type postResult struct {
 		article *model.Article
 	}
@@ -315,6 +506,9 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 	// Fetch posts concurrently
 	for i := 0; i < totalPosts; i++ {
 		postID := latestID - i
+		if postID <= 0 {
+			break
+		}
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -324,7 +518,7 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 			if err != nil {
 				return
 			}
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+			req.Header.Set("User-Agent", c.cfg.UserAgent)
 
 			resp, err := c.httpClient.Do(req)
 			if err != nil {
@@ -336,19 +530,24 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 				return
 			}
 
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 			if err != nil {
 				return
 			}
 
-			m := descRegex.FindStringSubmatch(string(body))
+			htmlStr := string(body)
+			if !isTelegramPostHTMLValid(htmlStr) {
+				return
+			}
+
+			m := descRegex.FindStringSubmatch(htmlStr)
 			if len(m) < 2 {
 				return
 			}
 
 			rawText := html.UnescapeString(m[1])
 			rawText = strings.TrimSpace(rawText)
-			if strings.HasPrefix(rawText, "You can view and join") || len(rawText) < 15 {
+			if !isTelegramPostContentValid(rawText) {
 				return
 			}
 
@@ -374,11 +573,50 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 				pubDate = time.Now().UTC()
 			}
 
+			rawLower := strings.ToLower(rawText)
+
+			detectedType := ""
+			if tSub := typeRegex.FindStringSubmatch(rawText); len(tSub) > 1 {
+				detectedType = strings.ToLower(strings.TrimSpace(tSub[1]))
+			}
+
+			// Akıllı Dark Web Kategori Sınıflandırması
+			categoryTag := "data-leak"
+			if strings.Contains(detectedType, "ransomware") || strings.Contains(rawLower, "lockbit") || strings.Contains(rawLower, "published a new victim") || strings.Contains(rawLower, "ransomware") {
+				categoryTag = "ransomware"
+			} else if strings.Contains(detectedType, "combolist") || strings.Contains(rawLower, "combolist") || strings.Contains(rawLower, "combo list") || strings.Contains(rawLower, "webmail login") || strings.Contains(rawLower, "stealer") || strings.Contains(rawLower, "email:pass") || strings.Contains(rawLower, "user:pass") {
+				categoryTag = "combolist"
+			} else if strings.Contains(rawLower, "network access") || strings.Contains(rawLower, "rdp access") || strings.Contains(rawLower, "vpn access") || strings.Contains(rawLower, "initial access") || strings.Contains(rawLower, "domain admin") || strings.Contains(rawLower, "access for sale") {
+				categoryTag = "initial-access"
+			} else if strings.Contains(rawLower, "sql dump") || strings.Contains(rawLower, "database dump") || strings.Contains(rawLower, "db dump") || (strings.Contains(rawLower, "lines") && strings.Contains(rawLower, "database")) {
+				categoryTag = "database-dump"
+			} else if strings.Contains(rawLower, "socks5") || strings.Contains(rawLower, "proxies") || strings.Contains(rawLower, "botnet") {
+				categoryTag = "infra-proxy"
+			}
+
 			extractedIoCs := ioc.Extract(rawText)
 			scoringResult := scorer.Evaluate(title, rawText)
 
 			tags := scoringResult.Tags
-			tags = append(tags, "data-breach", "leak")
+			tags = append(tags, categoryTag, "darkweb")
+			if categoryTag != "data-leak" {
+				tags = append(tags, "leak")
+			}
+
+			// Kaynak Dark Web Forumu ve Tehdit Aktörü Tespiti
+			if sSub := sourceForumRegex.FindStringSubmatch(rawText); len(sSub) > 1 {
+				cleanForum := strings.TrimSpace(sSub[1])
+				cleanForum = strings.ReplaceAll(cleanForum, "[.]", ".")
+				cleanForum = strings.ReplaceAll(cleanForum, "[dot]", ".")
+				tags = append(tags, "forum:"+cleanForum)
+			}
+			if aSub := authorRegex.FindStringSubmatch(rawText); len(aSub) > 1 {
+				cleanAuthor := strings.TrimSpace(aSub[1])
+				cleanAuthor = strings.Trim(cleanAuthor, " ()")
+				if cleanAuthor != "" && len(cleanAuthor) < 30 {
+					tags = append(tags, "actor:"+cleanAuthor)
+				}
+			}
 
 			resChan <- postResult{
 				article: &model.Article{

@@ -45,11 +45,13 @@ WORKDIR /app
 EXPOSE 8080
 
 ENV PORT=8080 \
-    DB_PATH=/data/ctifeed.db \
+    DB_HOST=127.0.0.1 \
+    DB_PORT=3306 \
+    DB_USER=ctifeed \
+    DB_PASSWORD=ctifeed_secret \
+    DB_NAME=ctifeed \
     INTERVAL=15m \
     WORKERS=5 \
     TIMEOUT=10s
-
-VOLUME ["/data"]
 
 ENTRYPOINT ["/app/ctifeed"]

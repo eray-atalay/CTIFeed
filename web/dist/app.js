@@ -547,11 +547,9 @@
     const tagsHTML = (article.tags || []).map(t => {
       const isCVE = t.toUpperCase().startsWith('CVE-');
       const isTR = t === 'TR-Focus';
-      const isExploit = t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation';
       let tagClass = 'tag-item';
       if (isCVE) tagClass += ' tag-cve';
       if (isTR) tagClass += ' tag-tr';
-      if (isExploit) tagClass += ' tag-exploit';
       return `<button class="${tagClass}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`;
     }).join('');
 
@@ -749,9 +747,6 @@
         }
         if (t === 'TR-Focus') {
           return `<span class="tag-item tag-tr">${escapeHtml(t)}</span>`;
-        }
-        if (t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation') {
-          return `<span class="tag-item tag-exploit">${escapeHtml(t)}</span>`;
         }
         return `<span class="tag-item">${escapeHtml(t)}</span>`;
       }).join('');

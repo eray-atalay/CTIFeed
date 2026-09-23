@@ -8,32 +8,34 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/go-sql-driver/mysql"
 
 	"ctifeed/internal/model"
 )
 
-// DB handles SQLite storage operations.
+// DB handles MySQL storage operations.
 type DB struct {
 	conn *sql.DB
 }
 
-// NewDB opens or initializes the SQLite database at the given path.
-func NewDB(dbPath string) (*DB, error) {
-	conn, err := sql.Open("sqlite", dbPath)
+// NewDB opens or initializes the MySQL database at the given DSN.
+func NewDB(dsn string) (*DB, error) {
+	conn, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
+		return nil, fmt.Errorf("failed to open mysql connection: %w", err)
 	}
 
-	conn.SetMaxOpenConns(1)
-	conn.SetConnMaxLifetime(time.Hour)
+	conn.SetMaxOpenConns(25)
+	conn.SetMaxIdleConns(10)
+	conn.SetConnMaxLifetime(5 * time.Minute)
+	conn.SetConnMaxIdleTime(2 * time.Minute)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := conn.PingContext(ctx); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
+		return nil, fmt.Errorf("failed to ping mysql database: %w", err)
 	}
 
 	db := &DB{conn: conn}
@@ -50,58 +52,64 @@ func (d *DB) Close() error {
 	return d.conn.Close()
 }
 
+// TruncateTables removes all records from all tables (used for testing and maintenance).
+func (d *DB) TruncateTables(ctx context.Context) error {
+	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs;")
+	_, _ = d.conn.ExecContext(ctx, "DELETE FROM user_subscriptions;")
+	_, err := d.conn.ExecContext(ctx, "DELETE FROM articles;")
+	return err
+}
+
 // migrate ensures database schema, indices, and cleanup tasks are executed.
 func (d *DB) migrate(ctx context.Context) error {
 	queries := []string{
-		`PRAGMA journal_mode = WAL;`,
-		`PRAGMA busy_timeout = 5000;`,
-		`PRAGMA synchronous = NORMAL;`,
 		`CREATE TABLE IF NOT EXISTS articles (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			source TEXT NOT NULL,
-			title TEXT NOT NULL,
-			link TEXT NOT NULL UNIQUE,
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			source VARCHAR(255) NOT NULL,
+			title VARCHAR(512) NOT NULL,
+			link VARCHAR(512) NOT NULL,
 			summary TEXT,
-			score INTEGER NOT NULL,
+			score INT NOT NULL,
 			tags TEXT NOT NULL,
 			published_at DATETIME NOT NULL,
-			created_at DATETIME NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_articles_score ON articles(score DESC);`,
-		`CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at DESC);`,
+			created_at DATETIME NOT NULL,
+			UNIQUE KEY uq_articles_link (link),
+			INDEX idx_articles_score (score DESC),
+			INDEX idx_articles_published (published_at DESC)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 
 		`CREATE TABLE IF NOT EXISTS user_subscriptions (
-			chat_id INTEGER NOT NULL,
-			tag TEXT NOT NULL,
+			chat_id BIGINT NOT NULL,
+			tag VARCHAR(128) NOT NULL,
 			created_at DATETIME NOT NULL,
-			PRIMARY KEY (chat_id, tag)
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_subscriptions_tag ON user_subscriptions(tag);`,
+			PRIMARY KEY (chat_id, tag),
+			INDEX idx_subscriptions_tag (tag)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 
 		`CREATE TABLE IF NOT EXISTS iocs (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			article_id INTEGER NOT NULL,
-			type TEXT NOT NULL,
-			value TEXT NOT NULL,
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			article_id BIGINT NOT NULL,
+			type VARCHAR(64) NOT NULL,
+			value VARCHAR(512) NOT NULL,
 			threat_context TEXT,
-			source TEXT,
+			source VARCHAR(255),
 			first_seen DATETIME NOT NULL,
-			FOREIGN KEY(article_id) REFERENCES articles(id) ON DELETE CASCADE,
-			UNIQUE(type, value, article_id)
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_iocs_type ON iocs(type);`,
-		`CREATE INDEX IF NOT EXISTS idx_iocs_value ON iocs(value);`,
-		`CREATE INDEX IF NOT EXISTS idx_iocs_first_seen ON iocs(first_seen DESC);`,
+			UNIQUE KEY uq_iocs_unique (type, value(255), article_id),
+			INDEX idx_iocs_type (type),
+			INDEX idx_iocs_value (value(255)),
+			INDEX idx_iocs_first_seen (first_seen DESC),
+			CONSTRAINT fk_iocs_article FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 	}
 
 	for _, q := range queries {
 		if _, err := d.conn.ExecContext(ctx, q); err != nil {
-			return fmt.Errorf("exec query %q failed: %w", q, err)
+			return fmt.Errorf("exec migration failed: %w (query: %s)", err, q)
 		}
 	}
 
-	_, _ = d.conn.ExecContext(ctx, "REINDEX;")
-	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > datetime('now', '+5 minutes');")
+	// Normalize future timestamps if published_at is ahead of current time
+	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > DATE_ADD(NOW(), INTERVAL 5 MINUTE);")
 
 	return nil
 }
@@ -123,7 +131,7 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 	}
 
 	query := `
-		INSERT OR IGNORE INTO articles (source, title, link, summary, score, tags, published_at, created_at)
+		INSERT IGNORE INTO articles (source, title, link, summary, score, tags, published_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 	`
 
@@ -136,8 +144,8 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 		article.Summary,
 		article.Score,
 		string(tagsJSON),
-		article.PublishedAt.UTC().Format(time.RFC3339),
-		article.CreatedAt.UTC().Format(time.RFC3339),
+		article.PublishedAt.UTC(),
+		article.CreatedAt.UTC(),
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to execute insert article: %w", err)
@@ -172,7 +180,7 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 	}()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT OR IGNORE INTO articles (source, title, link, summary, score, tags, published_at, created_at)
+		INSERT IGNORE INTO articles (source, title, link, summary, score, tags, published_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 	`)
 	if err != nil {
@@ -181,7 +189,7 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 	defer stmt.Close()
 
 	iocStmt, err := tx.PrepareContext(ctx, `
-		INSERT OR IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
+		INSERT IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
 		VALUES (?, ?, ?, ?, ?, ?);
 	`)
 	if err != nil {
@@ -211,8 +219,8 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 			a.Summary,
 			a.Score,
 			string(tagsJSON),
-			a.PublishedAt.UTC().Format(time.RFC3339),
-			a.CreatedAt.UTC().Format(time.RFC3339),
+			a.PublishedAt.UTC(),
+			a.CreatedAt.UTC(),
 		)
 		if err != nil {
 			return inserted, skipped, fmt.Errorf("failed to insert article (%s): %w", a.Link, err)
@@ -232,13 +240,12 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 		}
 
 		if a.ID > 0 && len(a.IoCs) > 0 {
-			nowStr := now.Format(time.RFC3339)
 			for _, item := range a.IoCs {
 				val := strings.TrimSpace(item.Value)
 				if val == "" {
 					continue
 				}
-				_, _ = iocStmt.ExecContext(ctx, a.ID, item.Type, val, a.Title, a.Source, nowStr)
+				_, _ = iocStmt.ExecContext(ctx, a.ID, item.Type, val, a.Title, a.Source, now)
 			}
 		}
 	}
@@ -274,7 +281,7 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 	for rows.Next() {
 		var a model.Article
 		var tagsJSON string
-		var pubStr, createdStr string
+		var pubVal, createdVal any
 
 		if err := rows.Scan(
 			&a.ID,
@@ -284,8 +291,8 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 			&a.Summary,
 			&a.Score,
 			&tagsJSON,
-			&pubStr,
-			&createdStr,
+			&pubVal,
+			&createdVal,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan article row: %w", err)
 		}
@@ -294,12 +301,8 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 			a.Tags = []string{}
 		}
 
-		if t, err := time.Parse(time.RFC3339, pubStr); err == nil {
-			a.PublishedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
-			a.CreatedAt = t
-		}
+		a.PublishedAt = parseDBTime(pubVal)
+		a.CreatedAt = parseDBTime(createdVal)
 
 		articles = append(articles, &a)
 	}
@@ -326,7 +329,6 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 	var args []any
 
 	cleanTag := strings.ToLower(strings.TrimSpace(tag))
-	sinceStr := since.UTC().Format(time.RFC3339)
 
 	switch cleanTag {
 	case "critical":
@@ -337,7 +339,7 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 			ORDER BY score DESC, published_at DESC 
 			LIMIT ?;
 		`
-		args = []any{sinceStr, limit}
+		args = []any{since.UTC(), limit}
 	case "tr-focus":
 		query = `
 			SELECT id, source, title, link, summary, score, tags, published_at, created_at
@@ -346,7 +348,7 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 			ORDER BY score DESC, published_at DESC 
 			LIMIT ?;
 		`
-		args = []any{sinceStr, limit}
+		args = []any{since.UTC(), limit}
 	case "cve":
 		query = `
 			SELECT id, source, title, link, summary, score, tags, published_at, created_at
@@ -355,7 +357,7 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 			ORDER BY score DESC, published_at DESC 
 			LIMIT ?;
 		`
-		args = []any{sinceStr, limit}
+		args = []any{since.UTC(), limit}
 	default:
 		query = `
 			SELECT id, source, title, link, summary, score, tags, published_at, created_at
@@ -365,7 +367,7 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 			LIMIT ?;
 		`
 		pattern := "%" + cleanTag + "%"
-		args = []any{pattern, pattern, sinceStr, limit}
+		args = []any{pattern, pattern, since.UTC(), limit}
 	}
 
 	rows, err := d.conn.QueryContext(ctx, query, args...)
@@ -378,7 +380,7 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 	for rows.Next() {
 		var a model.Article
 		var tagsJSON string
-		var pubStr, createdStr string
+		var pubVal, createdVal any
 
 		if err := rows.Scan(
 			&a.ID,
@@ -388,8 +390,8 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 			&a.Summary,
 			&a.Score,
 			&tagsJSON,
-			&pubStr,
-			&createdStr,
+			&pubVal,
+			&createdVal,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan article row: %w", err)
 		}
@@ -398,12 +400,8 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 			a.Tags = []string{}
 		}
 
-		if t, err := time.Parse(time.RFC3339, pubStr); err == nil {
-			a.PublishedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
-			a.CreatedAt = t
-		}
+		a.PublishedAt = parseDBTime(pubVal)
+		a.CreatedAt = parseDBTime(createdVal)
 
 		articles = append(articles, &a)
 	}
@@ -439,15 +437,20 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 	var args []any
 
 	if filter.TimeRange != "" {
+		now := time.Now().UTC()
 		switch filter.TimeRange {
 		case "today":
-			whereClauses = append(whereClauses, "published_at >= datetime('now', '-1 day')")
+			whereClauses = append(whereClauses, "published_at >= ?")
+			args = append(args, now.Add(-24*time.Hour))
 		case "1w":
-			whereClauses = append(whereClauses, "published_at >= datetime('now', '-7 days')")
+			whereClauses = append(whereClauses, "published_at >= ?")
+			args = append(args, now.Add(-7*24*time.Hour))
 		case "2w":
-			whereClauses = append(whereClauses, "published_at >= datetime('now', '-14 days')")
+			whereClauses = append(whereClauses, "published_at >= ?")
+			args = append(args, now.Add(-14*24*time.Hour))
 		case "1m":
-			whereClauses = append(whereClauses, "published_at >= datetime('now', '-30 days')")
+			whereClauses = append(whereClauses, "published_at >= ?")
+			args = append(args, now.Add(-30*24*time.Hour))
 		}
 	}
 	if filter.MinScore > 0 {
@@ -503,7 +506,7 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 	for rows.Next() {
 		var a model.Article
 		var tagsJSON string
-		var pubStr, createdStr string
+		var pubVal, createdVal any
 
 		if err := rows.Scan(
 			&a.ID,
@@ -513,8 +516,8 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 			&a.Summary,
 			&a.Score,
 			&tagsJSON,
-			&pubStr,
-			&createdStr,
+			&pubVal,
+			&createdVal,
 		); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan article row: %w", err)
 		}
@@ -523,12 +526,8 @@ func (d *DB) QueryArticles(ctx context.Context, filter ArticleFilter) ([]*model.
 			a.Tags = []string{}
 		}
 
-		if t, err := time.Parse(time.RFC3339, pubStr); err == nil {
-			a.PublishedAt = t
-		}
-		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
-			a.CreatedAt = t
-		}
+		a.PublishedAt = parseDBTime(pubVal)
+		a.CreatedAt = parseDBTime(createdVal)
 
 		articles = append(articles, &a)
 	}
@@ -585,7 +584,7 @@ func (d *DB) ToggleSubscription(ctx context.Context, chatID int64, tag string) (
 
 	_, err = d.conn.ExecContext(ctx,
 		"INSERT INTO user_subscriptions (chat_id, tag, created_at) VALUES (?, ?, ?)",
-		chatID, strings.ToLower(tag), time.Now().UTC().Format(time.RFC3339),
+		chatID, strings.ToLower(tag), time.Now().UTC(),
 	)
 	return true, err
 }
@@ -727,17 +726,18 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		}
 	}
 
-	// 7-day activity timeline
+	// 7-day activity timeline using MySQL DATE_FORMAT and parameter
+	since7d := time.Now().UTC().Add(-7 * 24 * time.Hour)
 	timeRows, err := d.conn.QueryContext(ctx, `
 		SELECT 
-			strftime('%Y-%m-%d', published_at) AS day,
+			DATE_FORMAT(published_at, '%Y-%m-%d') AS day,
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END), 0) AS critical
 		FROM articles
-		WHERE source NOT LIKE 'Telegram:%' AND published_at >= datetime('now', '-7 days')
+		WHERE source NOT LIKE 'Telegram:%' AND published_at >= ?
 		GROUP BY day
 		ORDER BY day ASC;
-	`)
+	`, since7d)
 	if err == nil {
 		defer timeRows.Close()
 		for timeRows.Next() {
@@ -748,7 +748,7 @@ func (d *DB) GetAnalytics(ctx context.Context) (*AnalyticsData, error) {
 		}
 	}
 
-	// 4. Tehdit Kategorileri ve Hedeflenen Teknolojiler (Telegram Hariç)
+	// Tehdit Kategorileri ve Hedeflenen Teknolojiler (Telegram Hariç)
 	categoryLabels := map[string]string{
 		"cve":          "CVE Zafiyetleri",
 		"tr-focus":     "TR-Focus (USOM/TR)",
@@ -844,7 +844,7 @@ func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, sourc
 	}
 
 	stmt, err := d.conn.PrepareContext(ctx, `
-		INSERT OR IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
+		INSERT IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
 		VALUES (?, ?, ?, ?, ?, ?);
 	`)
 	if err != nil {
@@ -852,7 +852,7 @@ func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, sourc
 	}
 	defer stmt.Close()
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
 	for _, item := range iocs {
 		val := strings.TrimSpace(item.Value)
 		if val == "" {
@@ -927,13 +927,11 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 	var iocs []model.IoC
 	for rows.Next() {
 		var item model.IoC
-		var firstSeenStr string
-		if err := rows.Scan(&item.ID, &item.ArticleID, &item.Type, &item.Value, &item.ThreatContext, &item.Source, &item.URL, &firstSeenStr); err != nil {
+		var firstSeenVal any
+		if err := rows.Scan(&item.ID, &item.ArticleID, &item.Type, &item.Value, &item.ThreatContext, &item.Source, &item.URL, &firstSeenVal); err != nil {
 			continue
 		}
-		if t, err := time.Parse(time.RFC3339, firstSeenStr); err == nil {
-			item.FirstSeen = t
-		}
+		item.FirstSeen = parseDBTime(firstSeenVal)
 		iocs = append(iocs, item)
 	}
 
@@ -1052,4 +1050,32 @@ func (d *DB) GetLatestTelegramPostID(ctx context.Context, source string) (int, e
 		}
 	}
 	return maxID, nil
+}
+
+// parseDBTime safely parses database date/time values from various possible types.
+func parseDBTime(val any) time.Time {
+	switch v := val.(type) {
+	case time.Time:
+		return v
+	case []byte:
+		return parseTimeString(string(v))
+	case string:
+		return parseTimeString(v)
+	}
+	return time.Time{}
+}
+
+func parseTimeString(s string) time.Time {
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05.999999",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }

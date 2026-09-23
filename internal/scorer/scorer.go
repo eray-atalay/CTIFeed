@@ -14,7 +14,23 @@ var (
 	cveRegex = regexp.MustCompile(`(?i)\bCVE-\d{4}-\d{4,7}\b`)
 	// htmlTagRegex strips HTML tags from feed summary descriptions.
 	htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
+	// trDomainRegex matches Turkish institutional and top-level domain targets (.gov.tr, .bel.tr, .edu.tr, etc.).
+	trDomainRegex = regexp.MustCompile(`(?i)\b[a-z0-9._%+-]+\.(?:gov|bel|edu|k12|org|com|net)\.tr\b`)
+	// trKeywordsRegex matches normalized Turkish CTI keywords, institutions, and regulators with word boundaries.
+	trKeywordsRegex = regexp.MustCompile(`(?i)\b(?:turkey|turkiye|turkish|turk|usom|btk|kvkk|cbddo|tr-cert|e-devlet|sgk|gib|tcmb|bddk|epdk|tubitak|aselsan|havelsan|tusas|turksat|ankara|istanbul)\b`)
+	// leakRegex matches leak and its inflectional forms.
+	leakRegex = regexp.MustCompile(`(?i)\bleak(?:s|ed|ing)?\b`)
+
+	// shortWordRegexes caches pre-compiled regexes for short keywords to avoid runtime compilations.
+	shortWordRegexes = map[string]*regexp.Regexp{}
 )
+
+func init() {
+	keywords := []string{"f5", "rce", "c2", "apt", "ssrf", "sqli", "poc"}
+	for _, kw := range keywords {
+		shortWordRegexes[kw] = regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(kw) + `\b`)
+	}
+}
 
 // Keywords and institutions for TR-Focus evaluation
 var turkeyKeywords = []string{
@@ -24,6 +40,9 @@ var turkeyKeywords = []string{
 	"turk",
 	"usom",
 	"btk",
+	"kvkk",
+	"cbddo",
+	"tr-cert",
 	"ankara",
 	"istanbul",
 	"e-devlet",
@@ -36,19 +55,10 @@ var turkeyKeywords = []string{
 	"tübitak",
 	"aselsan",
 	"havelsan",
-	"tai",
 	"tusas",
 	"tusaş",
-	"botas",
-	"botaş",
-	"tupras",
-	"tüpraş",
-	"turkcell",
-	"vodafone",
-	"türk telekom",
-	"turk telekom",
-	"bkm",
-	"bist",
+	"turksat",
+	"türksat",
 }
 
 // Active exploitation and PoC indicators (+25 points)
@@ -122,22 +132,22 @@ var threatVectors = map[string]string{
 	"pre-auth":              "pre-auth",
 
 	// Zararlı Yazılım ve Casusluk
-	"ransomware": "ransomware",
-	"infostealer": "infostealer",
-	"stealer":    "infostealer",
-	"wiper":      "wiper",
-	"spyware":    "spyware",
-	"c2":         "c2",
+	"ransomware":          "ransomware",
+	"infostealer":         "infostealer",
+	"stealer":             "infostealer",
+	"wiper":               "wiper",
+	"spyware":             "spyware",
+	"c2":                  "c2",
 	"command and control": "c2",
 
 	// Sızıntı, Casusluk ve Altyapı
-	"data breach":  "data-breach",
-	"leak":         "leak",
-	"apt":          "apt",
-	"supply chain": "supply-chain",
-	"ssrf":         "ssrf",
+	"data breach":   "data-breach",
+	"leak":          "leak",
+	"apt":           "apt",
+	"supply chain":  "supply-chain",
+	"ssrf":          "ssrf",
 	"sql injection": "sqli",
-	"sqli":         "sqli",
+	"sqli":          "sqli",
 }
 
 // StripHTML strips HTML markup and unescapes entities.
@@ -151,21 +161,16 @@ func StripHTML(input string) string {
 
 // Evaluate analyzes title and summary to calculate cumulative threat score and assign tags.
 func Evaluate(title, summary string) model.ScoringResult {
-	combined := strings.ToLower(title + " " + summary)
+	rawText := title + " " + summary
+	combined := strings.ToLower(rawText)
+	normalized := normalizeTurkish(rawText)
 
 	score := 0
 	tagSet := make(map[string]struct{})
 	breakdown := make(map[string]int)
 
 	// Turkey Focus (+50)
-	hasTR := false
-	for _, kw := range turkeyKeywords {
-		if containsWordOrPhrase(combined, kw) {
-			hasTR = true
-			break
-		}
-	}
-	if hasTR {
+	if trKeywordsRegex.MatchString(normalized) || trDomainRegex.MatchString(rawText) {
 		score += 50
 		tagSet["TR-Focus"] = struct{}{}
 		breakdown["TR-Focus"] = 50
@@ -249,16 +254,48 @@ func containsWordOrPhrase(text, target string) bool {
 
 	// "leak" gibi kök kelimelerde çekim eklerine (leak, leaked, leaks, leaking) izin verilir
 	if target == "leak" {
-		re := regexp.MustCompile(`(?i)\bleak(?:s|ed|ing)?\b`)
+		return leakRegex.MatchString(text)
+	}
+
+	// Önbelleklenmiş kısa kelime regex kontrolü
+	if re, ok := shortWordRegexes[target]; ok {
 		return re.MatchString(text)
 	}
 
 	// Kısa kısaltmalarda veya tekil kelimelerde hatalı pozitifleri önlemek için kelime sınırları (\b) aranır
-	// (Örn. "rce", "apt", "f5", "c2", "sgk", "gib", "btk", "bist", "ssrf")
 	if len(target) <= 4 {
 		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(target) + `\b`)
 		return re.MatchString(text)
 	}
 
 	return strings.Contains(text, target)
+}
+
+// normalizeTurkish converts Turkish characters to their ASCII equivalents and lowercases.
+func normalizeTurkish(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case 'ç', 'Ç':
+			b.WriteRune('c')
+		case 'ğ', 'Ğ':
+			b.WriteRune('g')
+		case 'ı', 'İ', 'I':
+			b.WriteRune('i')
+		case 'ö', 'Ö':
+			b.WriteRune('o')
+		case 'ş', 'Ş':
+			b.WriteRune('s')
+		case 'ü', 'Ü':
+			b.WriteRune('u')
+		default:
+			if r >= 'A' && r <= 'Z' {
+				b.WriteRune(r + ('a' - 'A'))
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }

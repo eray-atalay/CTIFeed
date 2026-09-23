@@ -13,7 +13,7 @@ const TAG_PILLS = [
   { label: 'Tüm Beslemeler', tag: '' },
   { label: 'TR-Focus', tag: 'TR-Focus', className: 'pill-tr' },
   { label: 'Zero-Day', tag: 'zero-day', className: 'pill-alert' },
-  { label: 'In-The-Wild', tag: 'in-the-wild', className: 'pill-exploit' },
+  { label: 'In-The-Wild', tag: 'in-the-wild' },
   { label: 'Ransomware', tag: 'ransomware', className: 'pill-ransom' },
   { label: 'RCE', tag: 'rce', className: 'pill-rce' },
   { label: 'Auth Bypass', tag: 'auth-bypass' },
@@ -318,11 +318,9 @@ export default function ThreatFeed() {
                         {article.tags.map((t) => {
                           const isCVE = t.toUpperCase().startsWith('CVE-');
                           const isTR = t === 'TR-Focus';
-                          const isExploit = t === 'in-the-wild' || t === 'poc' || t === 'active-exploitation';
                           let tagClass = 'tag-item';
                           if (isCVE) tagClass += ' tag-cve';
                           if (isTR) tagClass += ' tag-tr';
-                          if (isExploit) tagClass += ' tag-exploit';
 
                           return (
                             <button

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"time"
 
 	"ctifeed/internal/model"
@@ -10,7 +11,12 @@ import (
 // Config represents runtime configuration options.
 type Config struct {
 	Sources       []model.FeedSource
-	DBPath        string
+	MySQLDSN      string
+	DBHost        string
+	DBPort        string
+	DBUser        string
+	DBPassword    string
+	DBName        string
 	Workers       int
 	Timeout       time.Duration
 	Interval      time.Duration
@@ -20,6 +26,34 @@ type Config struct {
 	MinScore      int
 	UserAgent     string
 	TelegramToken string
+}
+
+// GetDSN returns the active MySQL connection string, building from host/port/user/pass if DSN is not directly specified.
+func (c *Config) GetDSN() string {
+	if c.MySQLDSN != "" {
+		return c.MySQLDSN
+	}
+	host := c.DBHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := c.DBPort
+	if port == "" {
+		port = "3306"
+	}
+	user := c.DBUser
+	if user == "" {
+		user = "ctifeed"
+	}
+	pass := c.DBPassword
+	if pass == "" {
+		pass = "ctifeed_secret"
+	}
+	name := c.DBName
+	if name == "" {
+		name = "ctifeed"
+	}
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=UTC", user, pass, host, port, name)
 }
 
 // DefaultSources returns the pre-configured CTI threat feed sources.
@@ -57,7 +91,12 @@ func DefaultSources() []model.FeedSource {
 func NewDefaultConfig() *Config {
 	return &Config{
 		Sources:       DefaultSources(),
-		DBPath:        "ctifeed.db",
+		MySQLDSN:      "",
+		DBHost:        "127.0.0.1",
+		DBPort:        "3306",
+		DBUser:        "ctifeed",
+		DBPassword:    "ctifeed_secret",
+		DBName:        "ctifeed",
 		Workers:       5,
 		Timeout:       10 * time.Second,
 		Interval:      15 * time.Minute,

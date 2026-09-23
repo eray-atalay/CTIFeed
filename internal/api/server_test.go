@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,20 +16,21 @@ import (
 )
 
 func setupTestServer(t *testing.T) (*Server, func()) {
-	tmpDir, err := os.MkdirTemp("", "ctifeed_api_test_*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
+	dsn := os.Getenv("TEST_MYSQL_DSN")
+	if dsn == "" {
+		dsn = "ctifeed:ctifeed_secret@tcp(127.0.0.1:3306)/ctifeed?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci&loc=UTC"
 	}
 
-	dbPath := filepath.Join(tmpDir, "test.db")
-	db, err := storage.NewDB(dbPath)
+	db, err := storage.NewDB(dsn)
 	if err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to init db: %v", err)
+		t.Skipf("MySQL not available (%v), skipping API test. (Set TEST_MYSQL_DSN to run)", err)
+		return nil, func() {}
 	}
+
+	ctx := context.Background()
+	_ = db.TruncateTables(ctx)
 
 	// Seed test article
-	ctx := context.Background()
 	_, _ = db.SaveArticle(ctx, &model.Article{
 		Source:      "SecurityWeek",
 		Title:       "Test CVE Article for API (CVE-2024-1111)",
@@ -47,8 +47,8 @@ func setupTestServer(t *testing.T) (*Server, func()) {
 	srv := NewServer(cfg, db, col, ":0")
 
 	cleanup := func() {
+		_ = db.TruncateTables(ctx)
 		_ = db.Close()
-		_ = os.RemoveAll(tmpDir)
 	}
 
 	return srv, cleanup

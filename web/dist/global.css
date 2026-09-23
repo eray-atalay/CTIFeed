@@ -398,16 +398,7 @@ button {
   color: #fdba74;
 }
 
-.pill-exploit {
-  border-color: rgba(234, 88, 12, 0.3);
-  color: #fb923c;
-}
 
-.pill-exploit.active {
-  background: #3e2010;
-  border-color: #ea580c;
-  color: #fdba74;
-}
 
 .filter-dropdowns {
   display: flex;
@@ -663,12 +654,7 @@ button {
   font-weight: 600;
 }
 
-.tag-exploit {
-  background: #331f14;
-  border-color: #63331b;
-  color: #fdba74;
-  font-weight: 600;
-}
+
 
 /* Kart Altı */
 .card-footer {

@@ -105,6 +105,7 @@ func main() {
 	}()
 
 	col := collector.New(cfg)
+	col.SetCursorProvider(db)
 
 	// Initialize Telegram bot if token is configured
 	tgBot, err := notifier.NewTelegramBot(cfg.TelegramToken, db)

@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +130,34 @@ func TestAPIEndpoints(t *testing.T) {
 		}
 		if data.Count != len(srv.cfg.Sources) {
 			t.Errorf("expected %d sources, got %d", len(srv.cfg.Sources), data.Count)
+		}
+
+		// Test /api/sources/toggle if we have sources in DB
+		_ = srv.db.SeedSources(context.Background(), srv.cfg.Sources)
+		dbSources, _ := srv.db.GetSources(context.Background())
+		if len(dbSources) > 0 {
+			targetID := dbSources[0].ID
+			toggleBody := strings.NewReader(fmt.Sprintf(`{"id": %d}`, targetID))
+			reqToggle := httptest.NewRequest("POST", "/api/sources/toggle", toggleBody)
+			reqToggle.Header.Set("Content-Type", "application/json")
+			recToggle := httptest.NewRecorder()
+			srv.server.Handler.ServeHTTP(recToggle, reqToggle)
+
+			if recToggle.Code != http.StatusOK {
+				t.Fatalf("expected 200 for /api/sources/toggle, got %d", recToggle.Code)
+			}
+
+			var toggleRes struct {
+				Success  bool  `json:"success"`
+				ID       int64 `json:"id"`
+				IsActive bool  `json:"is_active"`
+			}
+			if err := json.NewDecoder(recToggle.Body).Decode(&toggleRes); err != nil {
+				t.Fatalf("failed to decode toggle response: %v", err)
+			}
+			if toggleRes.IsActive != false {
+				t.Errorf("expected source to be toggled to false, got %v", toggleRes.IsActive)
+			}
 		}
 	}
 

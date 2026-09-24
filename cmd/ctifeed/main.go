@@ -130,6 +130,12 @@ func main() {
 
 	col := collector.New(cfg)
 	col.SetCursorProvider(db)
+	col.SetSourceProvider(db)
+
+	// Seed default sources into database if not already populated
+	if err := db.SeedSources(context.Background(), cfg.Sources); err != nil {
+		slog.Warn("Failed to seed feed sources", slog.String("error", err.Error()))
+	}
 
 	// Initialize Telegram bot if token is configured
 	tgBot, err := notifier.NewTelegramBot(cfg.TelegramToken, db)

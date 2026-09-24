@@ -63,3 +63,13 @@ export async function triggerScan(): Promise<ScanResponse> {
   if (!res.ok) throw new Error('Tarama döngüsü başlatılamadı');
   return res.json();
 }
+
+export async function toggleSource(id: number): Promise<{ success: boolean; id: number; is_active: boolean }> {
+  const res = await fetch('/api/sources/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new Error('Kaynak durumu güncellenemedi');
+  return res.json();
+}

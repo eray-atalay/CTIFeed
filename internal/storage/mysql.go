@@ -56,7 +56,11 @@ func (d *DB) Close() error {
 func (d *DB) TruncateTables(ctx context.Context) error {
 	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs;")
 	_, _ = d.conn.ExecContext(ctx, "DELETE FROM user_subscriptions;")
+	_, _ = d.conn.ExecContext(ctx, "DELETE FROM feed_sources;")
 	_, err := d.conn.ExecContext(ctx, "DELETE FROM articles;")
+	_, _ = d.conn.ExecContext(ctx, "ALTER TABLE articles AUTO_INCREMENT = 1;")
+	_, _ = d.conn.ExecContext(ctx, "ALTER TABLE iocs AUTO_INCREMENT = 1;")
+	_, _ = d.conn.ExecContext(ctx, "ALTER TABLE feed_sources AUTO_INCREMENT = 1;")
 	return err
 }
 
@@ -100,6 +104,22 @@ func (d *DB) migrate(ctx context.Context) error {
 			INDEX idx_iocs_first_seen (first_seen DESC),
 			CONSTRAINT fk_iocs_article FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
+
+		`CREATE TABLE IF NOT EXISTS feed_sources (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			url VARCHAR(512) NOT NULL,
+			category VARCHAR(128) NOT NULL,
+			is_active BOOLEAN NOT NULL DEFAULT TRUE,
+			last_fetched_at DATETIME,
+			last_status VARCHAR(64) DEFAULT 'pending',
+			response_time_ms BIGINT DEFAULT 0,
+			article_count INT DEFAULT 0,
+			last_error TEXT,
+			created_at DATETIME NOT NULL,
+			UNIQUE KEY uq_sources_url (url),
+			INDEX idx_sources_active (is_active)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`,
 	}
 
 	for _, q := range queries {
@@ -112,6 +132,135 @@ func (d *DB) migrate(ctx context.Context) error {
 	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > DATE_ADD(NOW(), INTERVAL 5 MINUTE);")
 
 	return nil
+}
+
+// SeedSources inserts default feeds into feed_sources if the table is currently empty.
+func (d *DB) SeedSources(ctx context.Context, defaults []model.FeedSource) error {
+	var count int
+	if err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM feed_sources").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	stmt, err := d.conn.PrepareContext(ctx, `
+		INSERT IGNORE INTO feed_sources (name, url, category, is_active, last_status, created_at)
+		VALUES (?, ?, ?, TRUE, 'pending', NOW());
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, s := range defaults {
+		_, _ = stmt.ExecContext(ctx, s.Name, s.URL, s.Category)
+	}
+	return nil
+}
+
+// GetSources returns all configured feed sources along with health metrics.
+func (d *DB) GetSources(ctx context.Context) ([]model.FeedSource, error) {
+	rows, err := d.conn.QueryContext(ctx, `
+		SELECT id, name, url, category, is_active, last_fetched_at, last_status, response_time_ms, article_count, COALESCE(last_error, '')
+		FROM feed_sources
+		ORDER BY id ASC;
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query feed sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []model.FeedSource
+	for rows.Next() {
+		var s model.FeedSource
+		var fetchedVal any
+		if err := rows.Scan(
+			&s.ID,
+			&s.Name,
+			&s.URL,
+			&s.Category,
+			&s.IsActive,
+			&fetchedVal,
+			&s.LastStatus,
+			&s.ResponseTimeMs,
+			&s.ArticleCount,
+			&s.LastError,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan feed source: %w", err)
+		}
+		if t := parseDBTime(fetchedVal); !t.IsZero() {
+			s.LastFetchedAt = &t
+		}
+		sources = append(sources, s)
+	}
+	return sources, nil
+}
+
+// GetActiveSources returns only active feed sources for scanning.
+func (d *DB) GetActiveSources(ctx context.Context) ([]model.FeedSource, error) {
+	rows, err := d.conn.QueryContext(ctx, `
+		SELECT id, name, url, category, is_active, last_fetched_at, last_status, response_time_ms, article_count, COALESCE(last_error, '')
+		FROM feed_sources
+		WHERE is_active = TRUE
+		ORDER BY id ASC;
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query active feed sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []model.FeedSource
+	for rows.Next() {
+		var s model.FeedSource
+		var fetchedVal any
+		if err := rows.Scan(
+			&s.ID,
+			&s.Name,
+			&s.URL,
+			&s.Category,
+			&s.IsActive,
+			&fetchedVal,
+			&s.LastStatus,
+			&s.ResponseTimeMs,
+			&s.ArticleCount,
+			&s.LastError,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan active feed source: %w", err)
+		}
+		if t := parseDBTime(fetchedVal); !t.IsZero() {
+			s.LastFetchedAt = &t
+		}
+		sources = append(sources, s)
+	}
+	return sources, nil
+}
+
+// ToggleSource switches a feed source between active and inactive.
+func (d *DB) ToggleSource(ctx context.Context, id int64) (bool, error) {
+	var currentActive bool
+	err := d.conn.QueryRowContext(ctx, "SELECT is_active FROM feed_sources WHERE id = ?", id).Scan(&currentActive)
+	if err != nil {
+		return false, fmt.Errorf("source not found: %w", err)
+	}
+
+	newActive := !currentActive
+	_, err = d.conn.ExecContext(ctx, "UPDATE feed_sources SET is_active = ? WHERE id = ?", newActive, id)
+	if err != nil {
+		return false, fmt.Errorf("failed to toggle source: %w", err)
+	}
+	return newActive, nil
+}
+
+// UpdateSourceHealth updates health status, latency, and statistics for a feed source.
+func (d *DB) UpdateSourceHealth(ctx context.Context, url string, status string, latencyMs int64, articleCount int, lastError string) error {
+	now := time.Now().UTC()
+	_, err := d.conn.ExecContext(ctx, `
+		UPDATE feed_sources 
+		SET last_fetched_at = ?, last_status = ?, response_time_ms = ?, article_count = ?, last_error = ?
+		WHERE url = ? OR url LIKE ?;
+	`, now, status, latencyMs, articleCount, lastError, url, url+"%")
+	return err
 }
 
 // SaveArticle inserts an article if it does not already exist.

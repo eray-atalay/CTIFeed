@@ -40,6 +40,10 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		collector: col,
 	}
 
+	if col != nil && db != nil {
+		col.SetSourceProvider(db)
+	}
+
 	mux := http.NewServeMux()
 
 	// REST API routes
@@ -48,6 +52,7 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	mux.HandleFunc("GET /api/iocs", s.handleGetIoCs)
 	mux.HandleFunc("GET /api/iocs/export", s.handleExportIoCs)
 	mux.HandleFunc("GET /api/sources", s.handleGetSources)
+	mux.HandleFunc("POST /api/sources/toggle", s.handleToggleSource)
 	mux.HandleFunc("GET /api/articles", s.handleGetArticles)
 	mux.HandleFunc("POST /api/scan", s.handlePostScan)
 
@@ -191,13 +196,57 @@ func (s *Server) handleExportIoCs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]any{
-		"count":   len(s.cfg.Sources),
-		"sources": s.cfg.Sources,
+	var sources []model.FeedSource
+	var err error
+
+	if s.db != nil {
+		sources, err = s.db.GetSources(r.Context())
+	}
+	if err != nil || len(sources) == 0 {
+		sources = s.cfg.Sources
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	resp := map[string]any{
+		"count":   len(sources),
+		"sources": sources,
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleToggleSource(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID int64 `json:"id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error": "Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.ID <= 0 {
+		http.Error(w, `{"error": "Invalid source ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	if s.db == nil {
+		http.Error(w, `{"error": "Database not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	newActive, err := s.db.ToggleSource(r.Context(), req.ID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success":   true,
+		"id":        req.ID,
+		"is_active": newActive,
+	})
 }
 
 func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {

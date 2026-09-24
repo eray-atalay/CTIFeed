@@ -1037,17 +1037,154 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  transition: all 0.2s ease;
+}
+
+.source-item-card.is-inactive {
+  opacity: 0.55;
+  background: rgba(14, 20, 34, 0.4);
+}
+
+.source-item-card.is-inactive:hover {
+  opacity: 0.85;
+}
+
+.source-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .source-info h5 {
   font-size: 0.875rem;
   font-weight: 500;
-  margin-bottom: 2px;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
 }
 
 .source-cat {
   font-size: 0.725rem;
   color: var(--text-muted);
+}
+
+.source-health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.source-health-dot.ok {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
+}
+
+.source-health-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+}
+
+.source-health-dot.pending {
+  background: #64748b;
+}
+
+.source-latency-badge {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+}
+
+.source-latency-badge.fast {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.source-latency-badge.medium {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.source-latency-badge.slow {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.source-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.source-toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.source-toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.source-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #334155;
+  transition: 0.25s;
+  border-radius: 20px;
+}
+
+.source-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 12px;
+  width: 12px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.25s;
+  border-radius: 50%;
+}
+
+.source-toggle-switch input:checked + .source-toggle-slider {
+  background-color: var(--accent-primary, #38bdf8);
+}
+
+.source-toggle-switch input:checked + .source-toggle-slider:before {
+  transform: translateX(14px);
 }
 
 /* Alt Bilgi */

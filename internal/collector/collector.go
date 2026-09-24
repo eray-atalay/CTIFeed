@@ -26,18 +26,30 @@ type TelegramCursorProvider interface {
 	GetLatestTelegramPostID(ctx context.Context, source string) (int, error)
 }
 
+// SourceProvider supplies active feed sources and records diagnostic health metrics.
+type SourceProvider interface {
+	GetActiveSources(ctx context.Context) ([]model.FeedSource, error)
+	UpdateSourceHealth(ctx context.Context, url string, status string, latencyMs int64, articleCount int, lastError string) error
+}
+
 // Collector manages concurrent fetching and parsing of CTI feeds.
 type Collector struct {
-	cfg        *config.Config
-	httpClient *http.Client
-	cursorDB   TelegramCursorProvider
-	latestIDMu sync.Mutex
-	latestIDs  map[string]int
+	cfg            *config.Config
+	httpClient     *http.Client
+	cursorDB       TelegramCursorProvider
+	sourceProvider SourceProvider
+	latestIDMu     sync.Mutex
+	latestIDs      map[string]int
 }
 
 // SetCursorProvider attaches a persistent storage provider for tracking Telegram cursors.
 func (c *Collector) SetCursorProvider(provider TelegramCursorProvider) {
 	c.cursorDB = provider
+}
+
+// SetSourceProvider attaches a persistent storage provider for dynamic sources and health reporting.
+func (c *Collector) SetSourceProvider(provider SourceProvider) {
+	c.sourceProvider = provider
 }
 
 // Result represents the aggregated outcome of a feed collection cycle.
@@ -55,10 +67,11 @@ type feedJob struct {
 }
 
 type feedResult struct {
-	source   model.FeedSource
-	articles []*model.Article
-	oldCnt   int
-	err      error
+	source    model.FeedSource
+	articles  []*model.Article
+	oldCnt    int
+	latencyMs int64
+	err       error
 }
 
 type headerTransport struct {
@@ -103,6 +116,14 @@ func New(cfg *config.Config) *Collector {
 func (c *Collector) CollectAll(ctx context.Context) Result {
 	startTime := time.Now()
 	sources := c.cfg.Sources
+
+	// Prefer dynamically configured active sources from storage if available
+	if c.sourceProvider != nil {
+		if activeSources, err := c.sourceProvider.GetActiveSources(ctx); err == nil && len(activeSources) > 0 {
+			sources = activeSources
+		}
+	}
+
 	workers := c.cfg.Workers
 	if workers <= 0 {
 		workers = 5
@@ -140,12 +161,16 @@ func (c *Collector) CollectAll(ctx context.Context) Result {
 	filteredOld := 0
 
 	for res := range results {
+		status := "ok"
+		errStr := ""
 		if res.err != nil {
 			failedCount++
+			status = "error"
+			errStr = res.err.Error()
 			slog.Warn("Feed collection failed",
 				slog.String("source", res.source.Name),
 				slog.String("url", res.source.URL),
-				slog.String("error", res.err.Error()),
+				slog.String("error", errStr),
 			)
 		} else {
 			successCount++
@@ -156,7 +181,12 @@ func (c *Collector) CollectAll(ctx context.Context) Result {
 				slog.String("source", res.source.Name),
 				slog.Int("valid_items", len(res.articles)),
 				slog.Int("filtered_old", res.oldCnt),
+				slog.Int64("latency_ms", res.latencyMs),
 			)
+		}
+
+		if c.sourceProvider != nil {
+			_ = c.sourceProvider.UpdateSourceHealth(ctx, res.source.URL, status, res.latencyMs, len(res.articles), errStr)
 		}
 	}
 
@@ -177,23 +207,25 @@ func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, res
 			results <- feedResult{source: job.source, err: ctx.Err()}
 			return
 		default:
+			start := time.Now()
+			var articles []*model.Article
+			var oldCnt int
+			var err error
+
 			// Check whether target is a Telegram channel or standard RSS/Atom
 			if strings.HasPrefix(job.source.URL, "telegram://") || strings.Contains(job.source.URL, "t.me/s/") {
-				articles, oldCnt, err := c.fetchTelegramFeed(ctx, job.source)
-				results <- feedResult{
-					source:   job.source,
-					articles: articles,
-					oldCnt:   oldCnt,
-					err:      err,
-				}
+				articles, oldCnt, err = c.fetchTelegramFeed(ctx, job.source)
 			} else {
-				articles, oldCnt, err := c.fetchFeed(ctx, job.source)
-				results <- feedResult{
-					source:   job.source,
-					articles: articles,
-					oldCnt:   oldCnt,
-					err:      err,
-				}
+				articles, oldCnt, err = c.fetchFeed(ctx, job.source)
+			}
+			latencyMs := time.Since(start).Milliseconds()
+
+			results <- feedResult{
+				source:    job.source,
+				articles:  articles,
+				oldCnt:    oldCnt,
+				latencyMs: latencyMs,
+				err:       err,
 			}
 		}
 	}

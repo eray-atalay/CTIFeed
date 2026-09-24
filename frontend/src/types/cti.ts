@@ -76,9 +76,16 @@ export interface AnalyticsData {
 }
 
 export interface SourceInfo {
+  id?: number;
   name: string;
   category?: string;
   url: string;
+  is_active?: boolean;
+  last_status?: 'ok' | 'error' | 'pending' | string;
+  response_time_ms?: number;
+  last_fetched_at?: string;
+  article_count?: number;
+  last_error?: string;
   count?: number;
   last_fetched?: string;
 }

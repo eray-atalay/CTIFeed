@@ -17,7 +17,7 @@ var (
 	// trDomainRegex matches Turkish institutional and top-level domain targets (.gov.tr, .bel.tr, .edu.tr, etc.).
 	trDomainRegex = regexp.MustCompile(`(?i)\b[a-z0-9._%+-]+\.(?:gov|bel|edu|k12|org|com|net)\.tr\b`)
 	// trKeywordsRegex matches normalized Turkish CTI keywords, institutions, and regulators with word boundaries.
-	trKeywordsRegex = regexp.MustCompile(`(?i)\b(?:turkey|turkiye|turkish|turk|usom|btk|kvkk|cbddo|tr-cert|e-devlet|sgk|gib|tcmb|bddk|epdk|tubitak|aselsan|havelsan|tusas|turksat|ankara|istanbul)\b`)
+	trKeywordsRegex = regexp.MustCompile(`(?i)\b(?:turkey|turkiye|turkish|turk|usom|btk|kvkk|cbddo|tr-cert|spk|tcmb|bddk|epdk|e-devlet|edevlet|mernis|e-nabiz|enabiz|sgk|gib|mhrs|osym|kamusm|afad|kizilay|tubitak|aselsan|havelsan|tusas|roketsan|stm|ssb|turksat|turkcell|turktelekom|superonline|papara|ininal|bkm|ziraat|vakifbank|halkbank|akbank|yapikredi|ankara|istanbul)\b`)
 	// leakRegex matches leak and its inflectional forms.
 	leakRegex = regexp.MustCompile(`(?i)\bleak(?:s|ed|ing)?\b`)
 
@@ -43,22 +43,46 @@ var turkeyKeywords = []string{
 	"kvkk",
 	"cbddo",
 	"tr-cert",
-	"ankara",
-	"istanbul",
-	"e-devlet",
-	"sgk",
-	"gib",
+	"spk",
 	"tcmb",
 	"bddk",
 	"epdk",
+	"e-devlet",
+	"edevlet",
+	"mernis",
+	"e-nabiz",
+	"enabiz",
+	"sgk",
+	"gib",
+	"mhrs",
+	"osym",
+	"kamusm",
+	"afad",
+	"kizilay",
 	"tubitak",
 	"tübitak",
 	"aselsan",
 	"havelsan",
 	"tusas",
 	"tusaş",
+	"roketsan",
+	"stm",
+	"ssb",
 	"turksat",
 	"türksat",
+	"turkcell",
+	"turktelekom",
+	"superonline",
+	"papara",
+	"ininal",
+	"bkm",
+	"ziraat",
+	"vakifbank",
+	"halkbank",
+	"akbank",
+	"yapikredi",
+	"ankara",
+	"istanbul",
 }
 
 // Active exploitation and PoC indicators (+25 points)

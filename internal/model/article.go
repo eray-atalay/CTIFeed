@@ -5,9 +5,16 @@ import "time"
 
 // FeedSource represents an RSS/Atom or Telegram feed endpoint.
 type FeedSource struct {
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Category string `json:"category,omitempty"`
+	ID             int64      `json:"id,omitempty"`
+	Name           string     `json:"name"`
+	URL            string     `json:"url"`
+	Category       string     `json:"category,omitempty"`
+	IsActive       bool       `json:"is_active"`
+	LastFetchedAt  *time.Time `json:"last_fetched_at,omitempty"`
+	LastStatus     string     `json:"last_status,omitempty"` // "ok", "error", "pending"
+	ResponseTimeMs int64      `json:"response_time_ms,omitempty"`
+	ArticleCount   int        `json:"article_count,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
 }
 
 // Article represents an ingested and analyzed cyber threat intelligence item.

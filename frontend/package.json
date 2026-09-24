@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build && node -e \"const fs=require('fs'); fs.mkdirSync('../web/dist', {recursive: true}); fs.cpSync('./dist', '../web/dist', {recursive: true})\"",
+    "build": "astro build && node -e \"const fs=require('fs'); fs.rmSync('../web/dist', {recursive: true, force: true}); fs.mkdirSync('../web/dist', {recursive: true}); fs.cpSync('./dist', '../web/dist', {recursive: true})\"",
     "preview": "astro preview",
     "astro": "astro"
   },

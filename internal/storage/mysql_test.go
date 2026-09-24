@@ -201,7 +201,9 @@ func TestSaveArticlesBatchAndQuery(t *testing.T) {
 		{Type: model.IoCTypeSHA256, Value: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
 	}
 
-	err = db.SaveIoCs(ctx, 1, "Test Campaign", "BleepingComputer", testIoCs)
+	var articleID int64
+	_ = db.conn.QueryRowContext(ctx, "SELECT id FROM articles ORDER BY id ASC LIMIT 1").Scan(&articleID)
+	err = db.SaveIoCs(ctx, articleID, "Test Campaign", "BleepingComputer", testIoCs)
 	if err != nil {
 		t.Fatalf("SaveIoCs failed: %v", err)
 	}

@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
-	"html"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -526,6 +526,7 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 	typeRegex := regexp.MustCompile(`(?i)"Type":\s*"([^"]+)"`)
 	sourceForumRegex := regexp.MustCompile(`(?i)"Source":\s*"([^"]+)"`)
 	authorRegex := regexp.MustCompile(`(?i)"author":\s*"([^"]+)"`)
+	timeRegex := regexp.MustCompile(`datetime="([^"]+)"`)
 
 	totalPosts := 30
 	type postResult struct {
@@ -596,9 +597,18 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 			}
 
 			pubDate := time.Now().UTC()
-			if dSub := dateRegex.FindStringSubmatch(rawText); len(dSub) > 1 {
-				if t, err := time.Parse("02 Jan 2006", strings.TrimSpace(dSub[1])); err == nil {
+			if tSub := timeRegex.FindStringSubmatch(htmlStr); len(tSub) > 1 {
+				if t, err := time.Parse(time.RFC3339, strings.TrimSpace(tSub[1])); err == nil {
 					pubDate = t.UTC()
+				}
+			} else if dSub := dateRegex.FindStringSubmatch(rawText); len(dSub) > 1 {
+				if t, err := time.Parse("02 Jan 2006", strings.TrimSpace(dSub[1])); err == nil {
+					now := time.Now().UTC()
+					if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+						pubDate = now
+					} else {
+						pubDate = t.UTC()
+					}
 				}
 			}
 			if pubDate.After(time.Now().Add(5 * time.Minute)) {

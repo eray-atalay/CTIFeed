@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks';
 import { activeModal, closeModal } from '../../services/store';
-import { fetchSources, toggleSource } from '../../services/api';
+import { fetchSources, toggleSource, addSource, deleteSource } from '../../services/api';
 import type { SourceInfo } from '../../types/cti';
 
 export default function SourcesModal() {
@@ -10,11 +10,20 @@ export default function SourcesModal() {
   const [loading, setLoading] = useState<boolean>(false);
   const [togglingId, setTogglingId] = useState<number | null>(null);
 
+  const [showAddForm, setShowAddForm] = useState<boolean>(false);
+  const [addType, setAddType] = useState<'twitter' | 'rss'>('twitter');
+  const [formInput, setFormInput] = useState<string>('');
+  const [formName, setFormName] = useState<string>('');
+  const [formCategory, setFormCategory] = useState<string>('Twitter Threat Intel');
+  const [formSubmitting, setFormSubmitting] = useState<boolean>(false);
+  const [formMsg, setFormMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
   const loadSources = () => {
     setLoading(true);
     fetchSources()
       .then((res) => setSources(res.sources || []))
-      .catch((err) => console.error('Kaynaklar yüklenirken hata:', err))
+      .catch((err) => console.error('Kaynaklar yuklenirken hata:', err))
       .finally(() => setLoading(false));
   };
 
@@ -43,7 +52,6 @@ export default function SourcesModal() {
     const previousState = src.is_active !== false;
     const nextState = !previousState;
 
-    // Optimistic UI update
     setSources((prev) =>
       prev.map((item) => (item.id === src.id ? { ...item, is_active: nextState } : item))
     );
@@ -55,14 +63,74 @@ export default function SourcesModal() {
         prev.map((item) => (item.id === src.id ? { ...item, is_active: res.is_active } : item))
       );
     } catch (err) {
-      console.error('Kaynak durumu değiştirilemedi:', err);
-      // Revert on error
+      console.error('Kaynak durumu degistirilemedi:', err);
       setSources((prev) =>
         prev.map((item) => (item.id === src.id ? { ...item, is_active: previousState } : item))
       );
     } finally {
       setTogglingId(null);
     }
+  };
+
+  const handleTypeChange = (type: 'twitter' | 'rss') => {
+    setAddType(type);
+    if (type === 'twitter') {
+      setFormCategory('Twitter Threat Intel');
+    } else {
+      setFormCategory('General Security');
+    }
+  };
+
+  const handleAddSubmit = async (e: Event) => {
+    e.preventDefault();
+    if (!formInput.trim()) {
+      setFormMsg({ type: 'error', text: 'Lütfen kullanıcı adı veya besleme URL adresi girin.' });
+      return;
+    }
+    setFormSubmitting(true);
+    setFormMsg(null);
+    try {
+      const res = await addSource({
+        name: formName.trim() || undefined,
+        url: formInput.trim(),
+        category: formCategory.trim() || undefined,
+      });
+      if (res.source) {
+        setSources((prev) => [res.source, ...prev]);
+        setFormMsg({ type: 'success', text: 'Yeni kaynak başarıyla eklendi!' });
+        setFormInput('');
+        setFormName('');
+        setTimeout(() => {
+          setShowAddForm(false);
+          setFormMsg(null);
+        }, 1200);
+      }
+    } catch (err: any) {
+      setFormMsg({ type: 'error', text: err.message || 'Kaynak eklenemedi.' });
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Bu kaynağı silmek istediğinize emin misiniz?')) return;
+    setDeletingId(id);
+    try {
+      await deleteSource(id);
+      setSources((prev) => prev.filter((s) => s.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'Kaynak silinemedi');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const getLinkUrl = (rawUrl: string) => {
+    if (rawUrl.includes('/api/rss/twitter/')) {
+      const idx = rawUrl.indexOf('/api/rss/twitter/');
+      return rawUrl.substring(idx);
+    }
+    return rawUrl;
   };
 
   if (!isOpen) return null;
@@ -97,16 +165,124 @@ export default function SourcesModal() {
             Siber tehditler, kritik CVE zafiyetleri ve TR-Focus istihbaratı için taranan kaynaklar ve sağlık durumları.
           </p>
 
-          <div style="margin-top: 14px;">
+          <div style="margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between;">
             <input
               type="text"
               class="search-input"
               placeholder="Kaynak veya kategori ara..."
               value={search}
               onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
-              style="width: 100%; max-width: 360px; font-size: 0.85rem; padding: 6px 12px; background: rgba(14,20,34,0.6); border: 1px solid var(--bg-card-border); border-radius: 6px; color: var(--text-base);"
+              style="width: 100%; max-width: 320px; font-size: 0.85rem; padding: 6px 12px; background: rgba(14,20,34,0.6); border: 1px solid var(--bg-card-border); border-radius: 6px; color: var(--text-base);"
             />
+            <button
+              type="button"
+              class="btn-primary"
+              onClick={() => {
+                setShowAddForm(!showAddForm);
+                setFormMsg(null);
+              }}
+              style="padding: 6px 14px; font-size: 0.82rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"
+            >
+              {showAddForm ? '✕ Formu Kapat' : '＋ Yeni X / RSS Kaynağı Ekle'}
+            </button>
           </div>
+
+          {showAddForm && (
+            <div style="margin-top: 14px; padding: 14px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px;">
+              <div style="display: flex; gap: 12px; margin-bottom: 12px; align-items: center;">
+                <span style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted);">Kaynak Tipi:</span>
+                <label style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.82rem; cursor: pointer; color: var(--text-base);">
+                  <input
+                    type="radio"
+                    name="addType"
+                    checked={addType === 'twitter'}
+                    onChange={() => handleTypeChange('twitter')}
+                  />
+                  X / Twitter Hesabı
+                </label>
+                <label style="display: inline-flex; align-items: center; gap: 4px; font-size: 0.82rem; cursor: pointer; color: var(--text-base);">
+                  <input
+                    type="radio"
+                    name="addType"
+                    checked={addType === 'rss'}
+                    onChange={() => handleTypeChange('rss')}
+                  />
+                  Standart RSS Beslemesi
+                </label>
+              </div>
+
+              <form onSubmit={handleAddSubmit} style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                <div>
+                  <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">
+                    {addType === 'twitter' ? 'X Kullanıcı Adı veya Link' : 'RSS Besleme URL'} *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={addType === 'twitter' ? '@vxunderground veya vxunderground' : 'https://example.com/feed.xml'}
+                    value={formInput}
+                    onInput={(e) => setFormInput((e.target as HTMLInputElement).value)}
+                    style="width: 100%; font-size: 0.82rem; padding: 6px 10px; background: rgba(10, 15, 29, 0.8); border: 1px solid var(--bg-card-border); border-radius: 6px; color: var(--text-base);"
+                  />
+                </div>
+
+                <div>
+                  <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">
+                    Kaynak Görünen Adı (İsteğe Bağlı)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={addType === 'twitter' ? 'X: vx-underground' : 'Güvenlik Bülteni'}
+                    value={formName}
+                    onInput={(e) => setFormName((e.target as HTMLInputElement).value)}
+                    style="width: 100%; font-size: 0.82rem; padding: 6px 10px; background: rgba(10, 15, 29, 0.8); border: 1px solid var(--bg-card-border); border-radius: 6px; color: var(--text-base);"
+                  />
+                </div>
+
+                <div>
+                  <label style="display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px;">
+                    Kategori
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Twitter Threat Intel / Zafiyet"
+                    value={formCategory}
+                    onInput={(e) => setFormCategory((e.target as HTMLInputElement).value)}
+                    style="width: 100%; font-size: 0.82rem; padding: 6px 10px; background: rgba(10, 15, 29, 0.8); border: 1px solid var(--bg-card-border); border-radius: 6px; color: var(--text-base);"
+                  />
+                </div>
+
+                <div style="display: flex; align-items: flex-end; gap: 8px;">
+                  <button
+                    type="submit"
+                    disabled={formSubmitting}
+                    class="btn-primary"
+                    style="padding: 7px 16px; font-size: 0.82rem; font-weight: 600; cursor: pointer; height: 33px;"
+                  >
+                    {formSubmitting ? 'Ekleniyor...' : 'Kaydet ve Ekle'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddForm(false)}
+                    class="btn-secondary"
+                    style="padding: 7px 12px; font-size: 0.82rem; cursor: pointer; height: 33px;"
+                  >
+                    İptal
+                  </button>
+                </div>
+              </form>
+
+              {formMsg && (
+                <div
+                  style={`margin-top: 10px; font-size: 0.8rem; font-weight: 600; color: ${
+                    formMsg.type === 'error' ? '#f87171' : '#4ade80'
+                  };`}
+                >
+                  {formMsg.text}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -179,7 +355,7 @@ export default function SourcesModal() {
                       </label>
                     )}
                     <a
-                      href={src.url}
+                      href={getLinkUrl(src.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       class="btn-link"
@@ -188,6 +364,18 @@ export default function SourcesModal() {
                     >
                       XML &rarr;
                     </a>
+                    {src.id && (
+                      <button
+                        type="button"
+                        class="btn-icon"
+                        disabled={deletingId === src.id}
+                        onClick={() => handleDelete(src.id!)}
+                        title="Kaynağı Sil"
+                        style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 4px 6px; font-size: 0.9rem;"
+                      >
+                        🗑
+                      </button>
+                    )}
                   </div>
                 </div>
               );

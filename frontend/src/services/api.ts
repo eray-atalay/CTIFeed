@@ -73,3 +73,24 @@ export async function toggleSource(id: number): Promise<{ success: boolean; id: 
   if (!res.ok) throw new Error('Kaynak durumu güncellenemedi');
   return res.json();
 }
+
+export async function addSource(data: { name?: string; url: string; category?: string }): Promise<{ success: boolean; source: SourceInfo }> {
+  const res = await fetch('/api/sources', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Kaynak eklenemedi');
+  }
+  return res.json();
+}
+
+export async function deleteSource(id: number): Promise<{ success: boolean; id: number }> {
+  const res = await fetch(`/api/sources?id=${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Kaynak silinemedi');
+  return res.json();
+}

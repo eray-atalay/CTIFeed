@@ -59,6 +59,12 @@ func main() {
 	if envTG := os.Getenv("TELEGRAM_BOT_TOKEN"); envTG != "" && cfg.TelegramToken == "" {
 		cfg.TelegramToken = envTG
 	}
+	if envAuth := os.Getenv("TWITTER_AUTH_TOKEN"); envAuth != "" {
+		cfg.TwitterAuthToken = envAuth
+	}
+	if envCT0 := os.Getenv("TWITTER_CT0"); envCT0 != "" {
+		cfg.TwitterCT0 = envCT0
+	}
 	if envPort := os.Getenv("PORT"); envPort != "" && *port == "8080" {
 		*port = envPort
 	}

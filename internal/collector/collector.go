@@ -3,12 +3,15 @@ package collector
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -212,9 +215,10 @@ func (c *Collector) worker(ctx context.Context, id int, jobs <-chan feedJob, res
 			var oldCnt int
 			var err error
 
-			// Check whether target is a Telegram channel or standard RSS/Atom
 			if strings.HasPrefix(job.source.URL, "telegram://") || strings.Contains(job.source.URL, "t.me/s/") {
 				articles, oldCnt, err = c.fetchTelegramFeed(ctx, job.source)
+			} else if strings.HasPrefix(job.source.URL, "twitter://") || strings.HasPrefix(job.source.URL, "x://") || strings.Contains(job.source.URL, "x.com/") || strings.Contains(job.source.URL, "twitter.com/") {
+				articles, oldCnt, err = c.fetchTwitterFeed(ctx, job.source)
 			} else {
 				articles, oldCnt, err = c.fetchFeed(ctx, job.source)
 			}
@@ -691,14 +695,23 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 
 // fetchFeed parses standard RSS/Atom feeds.
 func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
-	ctx, cancel := context.WithTimeout(parentCtx, c.cfg.Timeout)
+	fetchTimeout := c.cfg.Timeout
+	if strings.Contains(src.URL, "/api/rss/twitter/") && fetchTimeout < 25*time.Second {
+		fetchTimeout = 25 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, fetchTimeout)
 	defer cancel()
 
 	fp := gofeed.NewParser()
 	fp.Client = c.httpClient
 	fp.UserAgent = c.cfg.UserAgent
 
-	feed, err := fp.ParseURLWithContext(src.URL, ctx)
+	feedURL := src.URL
+	if strings.HasPrefix(feedURL, "/") {
+		feedURL = "http://127.0.0.1:8080" + feedURL
+	}
+
+	feed, err := fp.ParseURLWithContext(feedURL, ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("parse feed error: %w", err)
 	}
@@ -741,6 +754,13 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 			cleanSummary = scorer.StripHTML(item.Content)
 		}
 
+		if strings.HasPrefix(cleanTitle, "RT @") || strings.HasPrefix(cleanSummary, "RT @") {
+			continue
+		}
+		if strings.TrimSpace(cleanSummary) == "" && strings.TrimSpace(cleanTitle) == "" {
+			continue
+		}
+
 		fullText := cleanTitle + " " + item.Description + " " + item.Content
 		extractedIoCs := ioc.Extract(fullText)
 
@@ -776,4 +796,270 @@ func parseItemDate(item *gofeed.Item) time.Time {
 		return *item.UpdatedParsed
 	}
 	return time.Time{}
+}
+
+type twitterNextData struct {
+	Props struct {
+		PageProps struct {
+			Timeline struct {
+				Entries []struct {
+					Content struct {
+						Tweet struct {
+							IDStr     string `json:"id_str"`
+							Text      string `json:"text"`
+							CreatedAt string `json:"created_at"`
+							Permalink string `json:"permalink"`
+						} `json:"tweet"`
+					} `json:"content"`
+				} `json:"entries"`
+			} `json:"timeline"`
+		} `json:"pageProps"`
+	} `json:"props"`
+}
+
+var (
+	nextDataRegex = regexp.MustCompile(`<script id="__NEXT_DATA__" type="application/json">([^<]+)</script>`)
+	xSSRRegex     = regexp.MustCompile(`created_at_ms:(\d+).{1,100}?full_text:"((?:\\.|[^"\\])*)"`)
+	xSSRIDRegex   = regexp.MustCompile(`edit_tweet_ids:[^=]+=\["(\d+)"`)
+	xSSRB64Regex  = regexp.MustCompile(`id:"(VHdlZXQ6[A-Za-z0-9+/=]+)"`)
+)
+
+func (c *Collector) FetchTwitterArticles(ctx context.Context, username string) ([]*model.Article, error) {
+	src := model.FeedSource{
+		Name: "X: " + username,
+		URL:  "twitter://" + username,
+	}
+	articles, _, err := c.fetchTwitterFeed(ctx, src)
+	return articles, err
+}
+
+func (c *Collector) fetchTwitterFeed(parentCtx context.Context, src model.FeedSource) ([]*model.Article, int, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
+	defer cancel()
+
+	username := strings.TrimPrefix(src.URL, "twitter://")
+	username = strings.TrimPrefix(username, "x://")
+	username = strings.TrimPrefix(username, "https://x.com/")
+	username = strings.TrimPrefix(username, "https://twitter.com/")
+	username = strings.Trim(username, "/")
+	if idx := strings.Index(username, "?"); idx != -1 {
+		username = username[:idx]
+	}
+
+	twitterCutoff := time.Now().Add(-7 * 24 * time.Hour)
+	if c.cfg.MaxAgeHours > 0 && c.cfg.MaxAgeHours < 7*24*time.Hour {
+		twitterCutoff = time.Now().Add(-c.cfg.MaxAgeHours)
+	}
+
+	if c.cfg.TwitterAuthToken != "" && c.cfg.TwitterCT0 != "" {
+		directURL := fmt.Sprintf("https://x.com/%s", username)
+		req, err := http.NewRequestWithContext(ctx, "GET", directURL, nil)
+		if err == nil {
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+			req.Header.Set("Cookie", fmt.Sprintf("auth_token=%s; ct0=%s", c.cfg.TwitterAuthToken, c.cfg.TwitterCT0))
+			req.Header.Set("x-csrf-token", c.cfg.TwitterCT0)
+
+			resp, err := c.httpClient.Do(req)
+			if err == nil && resp.StatusCode == http.StatusOK {
+				body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+				resp.Body.Close()
+				if err == nil {
+					bodyStr := string(body)
+					matches := xSSRRegex.FindAllStringSubmatchIndex(bodyStr, -1)
+					if len(matches) > 0 {
+						var articles []*model.Article
+						oldCnt := 0
+						seenIDs := make(map[string]bool)
+
+						for _, loc := range matches {
+							if len(articles) >= 30 {
+								break
+							}
+
+							tsStr := bodyStr[loc[2]:loc[3]]
+							rawText := bodyStr[loc[4]:loc[5]]
+							ts, err := strconv.ParseInt(tsStr, 10, 64)
+							if err != nil {
+								continue
+							}
+							pubDate := time.UnixMilli(ts).UTC()
+
+							afterEnd := loc[1] + 600
+							if afterEnd > len(bodyStr) {
+								afterEnd = len(bodyStr)
+							}
+							after := bodyStr[loc[1]:afterEnd]
+
+							tweetID := ""
+							if idM := xSSRIDRegex.FindStringSubmatch(after); len(idM) > 1 {
+								tweetID = idM[1]
+							} else if b64M := xSSRB64Regex.FindStringSubmatch(after); len(b64M) > 1 {
+								if dec, err := base64.StdEncoding.DecodeString(b64M[1]); err == nil {
+									tweetID = strings.TrimPrefix(string(dec), "Tweet:")
+								}
+							}
+							if tweetID == "" || seenIDs[tweetID] {
+								continue
+							}
+							seenIDs[tweetID] = true
+
+							if pubDate.Before(twitterCutoff) {
+								oldCnt++
+								continue
+							}
+
+							cleanSummary := strings.ReplaceAll(rawText, `\n`, "\n")
+							cleanSummary = strings.ReplaceAll(cleanSummary, `\"`, `"`)
+							cleanSummary = html.UnescapeString(cleanSummary)
+							cleanSummary = strings.TrimSpace(cleanSummary)
+
+							if strings.HasPrefix(cleanSummary, "RT @") || strings.HasPrefix(rawText, "RT @") {
+								continue
+							}
+							if cleanSummary == "" {
+								continue
+							}
+
+							cleanTitle := cleanSummary
+							if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
+								cleanTitle = strings.TrimSpace(cleanTitle[:idx])
+							}
+							if len(cleanTitle) > 120 {
+								cleanTitle = cleanTitle[:117] + "..."
+							}
+							if cleanTitle == "" {
+								cleanTitle = fmt.Sprintf("[%s] X Postu", src.Name)
+							}
+
+							link := fmt.Sprintf("https://x.com/%s/status/%s", username, tweetID)
+							extractedIoCs := ioc.Extract(cleanSummary)
+							scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
+
+							articles = append(articles, &model.Article{
+								Source:      src.Name,
+								Title:       cleanTitle,
+								Link:        link,
+								Summary:     cleanSummary,
+								Score:       scoringResult.Score,
+								Tags:        scoringResult.Tags,
+								PublishedAt: pubDate.UTC(),
+								CreatedAt:   time.Now().UTC(),
+								IoCs:        extractedIoCs,
+							})
+						}
+
+						if len(articles) > 0 {
+							return articles, oldCnt, nil
+						}
+					}
+				}
+			} else if resp != nil {
+				resp.Body.Close()
+			}
+		}
+	}
+
+	reqURL := fmt.Sprintf("https://syndication.twitter.com/srv/timeline-profile/screen-name/%s", username)
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+	if c.cfg.TwitterAuthToken != "" && c.cfg.TwitterCT0 != "" {
+		req.Header.Set("Cookie", fmt.Sprintf("auth_token=%s; ct0=%s", c.cfg.TwitterAuthToken, c.cfg.TwitterCT0))
+		req.Header.Set("x-csrf-token", c.cfg.TwitterCT0)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, 0, fmt.Errorf("twitter syndication status: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	m := nextDataRegex.FindSubmatch(body)
+	if len(m) < 2 {
+		return nil, 0, fmt.Errorf("twitter data not found")
+	}
+
+	var data twitterNextData
+	if err := json.Unmarshal(m[1], &data); err != nil {
+		return nil, 0, fmt.Errorf("failed to decode twitter json: %w", err)
+	}
+
+	var articles []*model.Article
+	oldCnt := 0
+
+	for _, entry := range data.Props.PageProps.Timeline.Entries {
+		if len(articles) >= 30 {
+			break
+		}
+
+		tw := entry.Content.Tweet
+		if tw.IDStr == "" || tw.Text == "" {
+			continue
+		}
+
+		pubDate := time.Now().UTC()
+		if t, err := time.Parse("Mon Jan 02 15:04:05 -0700 2006", tw.CreatedAt); err == nil {
+			pubDate = t.UTC()
+		}
+
+		if pubDate.Before(twitterCutoff) {
+			oldCnt++
+			continue
+		}
+
+		cleanSummary := html.UnescapeString(tw.Text)
+		cleanSummary = strings.TrimSpace(cleanSummary)
+		if strings.HasPrefix(cleanSummary, "RT @") {
+			continue
+		}
+		if cleanSummary == "" {
+			continue
+		}
+		cleanTitle := cleanSummary
+		if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
+			cleanTitle = strings.TrimSpace(cleanTitle[:idx])
+		}
+		if len(cleanTitle) > 120 {
+			cleanTitle = cleanTitle[:117] + "..."
+		}
+		if cleanTitle == "" {
+			cleanTitle = fmt.Sprintf("[%s] X Postu", src.Name)
+		}
+
+		link := tw.Permalink
+		if link != "" {
+			link = "https://x.com" + link
+		} else {
+			link = fmt.Sprintf("https://x.com/%s/status/%s", username, tw.IDStr)
+		}
+
+		extractedIoCs := ioc.Extract(cleanSummary)
+		scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
+
+		articles = append(articles, &model.Article{
+			Source:      src.Name,
+			Title:       cleanTitle,
+			Link:        link,
+			Summary:     cleanSummary,
+			Score:       scoringResult.Score,
+			Tags:        scoringResult.Tags,
+			PublishedAt: pubDate.UTC(),
+			CreatedAt:   time.Now().UTC(),
+			IoCs:        extractedIoCs,
+		})
+	}
+
+	return articles, oldCnt, nil
 }

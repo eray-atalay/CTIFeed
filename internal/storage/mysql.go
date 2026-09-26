@@ -136,14 +136,6 @@ func (d *DB) migrate(ctx context.Context) error {
 
 // SeedSources inserts default feeds into feed_sources if the table is currently empty.
 func (d *DB) SeedSources(ctx context.Context, defaults []model.FeedSource) error {
-	var count int
-	if err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM feed_sources").Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
 	stmt, err := d.conn.PrepareContext(ctx, `
 		INSERT IGNORE INTO feed_sources (name, url, category, is_active, last_status, created_at)
 		VALUES (?, ?, ?, TRUE, 'pending', NOW());
@@ -260,6 +252,33 @@ func (d *DB) UpdateSourceHealth(ctx context.Context, url string, status string, 
 		SET last_fetched_at = ?, last_status = ?, response_time_ms = ?, article_count = ?, last_error = ?
 		WHERE url = ? OR url LIKE ?;
 	`, now, status, latencyMs, articleCount, lastError, url, url+"%")
+	return err
+}
+
+func (d *DB) AddSource(ctx context.Context, name, url, category string) (*model.FeedSource, error) {
+	now := time.Now().UTC()
+	res, err := d.conn.ExecContext(ctx, `
+		INSERT INTO feed_sources (name, url, category, is_active, last_status, created_at)
+		VALUES (?, ?, ?, 1, 'pending', ?)
+	`, name, url, category, now)
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return &model.FeedSource{
+		ID:       id,
+		Name:     name,
+		URL:      url,
+		Category: category,
+		IsActive: true,
+	}, nil
+}
+
+func (d *DB) DeleteSource(ctx context.Context, id int64) error {
+	_, err := d.conn.ExecContext(ctx, "DELETE FROM feed_sources WHERE id = ?", id)
 	return err
 }
 

@@ -10,22 +10,24 @@ import (
 
 // Config represents runtime configuration options.
 type Config struct {
-	Sources       []model.FeedSource
-	MySQLDSN      string
-	DBHost        string
-	DBPort        string
-	DBUser        string
-	DBPassword    string
-	DBName        string
-	Workers       int
-	Timeout       time.Duration
-	Interval      time.Duration
-	MaxAgeHours   time.Duration
-	DaemonMode    bool
-	TopArticles   int
-	MinScore      int
-	UserAgent     string
-	TelegramToken string
+	Sources          []model.FeedSource
+	MySQLDSN         string
+	DBHost           string
+	DBPort           string
+	DBUser           string
+	DBPassword       string
+	DBName           string
+	Workers          int
+	Timeout          time.Duration
+	Interval         time.Duration
+	MaxAgeHours      time.Duration
+	DaemonMode       bool
+	TopArticles      int
+	MinScore         int
+	UserAgent        string
+	TelegramToken    string
+	TwitterAuthToken string
+	TwitterCT0       string
 }
 
 // GetDSN returns the active MySQL connection string, building from host/port/user/pass if DSN is not directly specified.
@@ -84,6 +86,12 @@ func DefaultSources() []model.FeedSource {
 		{Name: "Red Canary Blog", URL: "https://redcanary.com/blog/feed/", Category: "Threat Research & Detection"},
 		{Name: "Telegram: cveNotify", URL: "telegram://cveNotify", Category: "Telegram CVE"},
 		{Name: "Telegram: breachdetect", URL: "telegram://breachdetect", Category: "Telegram Breach"},
+		{Name: "CISA Cybersecurity Advisories", URL: "https://www.cisa.gov/cybersecurity-advisories/all.xml", Category: "Government & Alerts"},
+		{Name: "International Cyber Digest", URL: "https://www.internationalcyberdigest.com/feed/", Category: "Cyber News"},
+		{Name: "X: DarkWebInformer", URL: "http://localhost:8080/api/rss/twitter/DarkWebInformer", Category: "Twitter Threat Intel"},
+		{Name: "X: IntCyberDigest", URL: "http://localhost:8080/api/rss/twitter/IntCyberDigest", Category: "Twitter Threat Intel"},
+		{Name: "X: CVEnew", URL: "http://localhost:8080/api/rss/twitter/CVEnew", Category: "Twitter CVE"},
+		{Name: "X: DailyDarkWeb", URL: "http://localhost:8080/api/rss/twitter/DailyDarkWeb", Category: "Twitter Threat Intel"},
 	}
 }
 

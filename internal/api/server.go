@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -52,9 +53,12 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	mux.HandleFunc("GET /api/iocs", s.handleGetIoCs)
 	mux.HandleFunc("GET /api/iocs/export", s.handleExportIoCs)
 	mux.HandleFunc("GET /api/sources", s.handleGetSources)
+	mux.HandleFunc("POST /api/sources", s.handleAddSource)
+	mux.HandleFunc("DELETE /api/sources", s.handleDeleteSource)
 	mux.HandleFunc("POST /api/sources/toggle", s.handleToggleSource)
 	mux.HandleFunc("GET /api/articles", s.handleGetArticles)
 	mux.HandleFunc("POST /api/scan", s.handlePostScan)
+	mux.HandleFunc("GET /api/rss/twitter/{username}", s.handleGetTwitterRSS)
 
 	// Static asset file server from embedded assets
 	staticFS, err := fs.Sub(web.Assets, "dist")
@@ -104,7 +108,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {
@@ -249,6 +253,133 @@ func (s *Server) handleToggleSource(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleAddSource(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		http.Error(w, `{"error": "Database not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		Name     string `json:"name"`
+		URL      string `json:"url"`
+		Category string `json:"category"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error": "Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	rawURL := strings.TrimSpace(req.URL)
+	if rawURL == "" {
+		http.Error(w, `{"error": "URL veya kullanici adi zorunludur"}`, http.StatusBadRequest)
+		return
+	}
+
+	var finalURL string
+	var finalName string
+	finalCategory := strings.TrimSpace(req.Category)
+
+	isTwitter := strings.HasPrefix(rawURL, "@") ||
+		strings.HasPrefix(rawURL, "twitter://") ||
+		strings.HasPrefix(rawURL, "x://") ||
+		strings.Contains(rawURL, "x.com/") ||
+		strings.Contains(rawURL, "twitter.com/") ||
+		strings.Contains(rawURL, "/api/rss/twitter/")
+
+	if isTwitter {
+		username := rawURL
+		username = strings.TrimPrefix(username, "@")
+		username = strings.TrimPrefix(username, "twitter://")
+		username = strings.TrimPrefix(username, "x://")
+		username = strings.TrimPrefix(username, "https://x.com/")
+		username = strings.TrimPrefix(username, "http://x.com/")
+		username = strings.TrimPrefix(username, "https://twitter.com/")
+		username = strings.TrimPrefix(username, "http://twitter.com/")
+		if idx := strings.Index(username, "/api/rss/twitter/"); idx != -1 {
+			username = username[idx+len("/api/rss/twitter/"):]
+		}
+		username = strings.Trim(username, "/")
+		if idx := strings.Index(username, "?"); idx != -1 {
+			username = username[:idx]
+		}
+		if username == "" {
+			http.Error(w, `{"error": "Gecersiz Twitter kullanici adi"}`, http.StatusBadRequest)
+			return
+		}
+		finalURL = fmt.Sprintf("http://localhost:8080/api/rss/twitter/%s", username)
+		if strings.TrimSpace(req.Name) != "" {
+			finalName = strings.TrimSpace(req.Name)
+		} else {
+			finalName = "X: @" + username
+		}
+		if finalCategory == "" {
+			finalCategory = "Twitter Threat Intel"
+		}
+	} else {
+		finalURL = rawURL
+		if !strings.HasPrefix(finalURL, "http://") && !strings.HasPrefix(finalURL, "https://") && !strings.HasPrefix(finalURL, "telegram://") {
+			finalURL = "https://" + finalURL
+		}
+		if strings.TrimSpace(req.Name) != "" {
+			finalName = strings.TrimSpace(req.Name)
+		} else {
+			finalName = finalURL
+		}
+		if finalCategory == "" {
+			finalCategory = "Custom RSS"
+		}
+	}
+
+	newSrc, err := s.db.AddSource(r.Context(), finalName, finalURL, finalCategory)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"source":  newSrc,
+	})
+}
+
+func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		http.Error(w, `{"error": "Database not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		var req struct {
+			ID int64 `json:"id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.ID > 0 {
+			idStr = strconv.FormatInt(req.ID, 10)
+		}
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, `{"error": "Invalid source ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.db.DeleteSource(r.Context(), id); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"id":      id,
+	})
+}
+
 func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
@@ -261,13 +392,13 @@ func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 	minScore, _ := strconv.Atoi(query.Get("min_score"))
 
 	filter := storage.ArticleFilter{
-		Search:   query.Get("search"),
-		Tag:      query.Get("tag"),
-		Source:   query.Get("source"),
-		MinScore: minScore,
-		Limit:    limit,
-		Offset:   offset,
-		SortBy:   query.Get("sort"),
+		Search:    query.Get("search"),
+		Tag:       query.Get("tag"),
+		Source:    query.Get("source"),
+		MinScore:  minScore,
+		Limit:     limit,
+		Offset:    offset,
+		SortBy:    query.Get("sort"),
 		TimeRange: query.Get("time_range"),
 	}
 
@@ -363,4 +494,77 @@ func (s *Server) TriggerScan(ctx context.Context) (int, int, error) {
 		}
 	}
 	return inserted, skipped, err
+}
+
+type rssItem struct {
+	XMLName     xml.Name `xml:"item"`
+	Title       string   `xml:"title"`
+	Link        string   `xml:"link"`
+	Description string   `xml:"description"`
+	PubDate     string   `xml:"pubDate"`
+	Guid        string   `xml:"guid"`
+}
+
+type rssChannel struct {
+	XMLName       xml.Name  `xml:"channel"`
+	Title         string    `xml:"title"`
+	Link          string    `xml:"link"`
+	Description   string    `xml:"description"`
+	LastBuildDate string    `xml:"lastBuildDate"`
+	Items         []rssItem `xml:"item"`
+}
+
+type rssFeed struct {
+	XMLName xml.Name   `xml:"rss"`
+	Version string     `xml:"version,attr"`
+	Channel rssChannel `xml:"channel"`
+}
+
+func (s *Server) handleGetTwitterRSS(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	if username == "" {
+		username = r.URL.Query().Get("user")
+	}
+	username = strings.TrimSpace(username)
+	username = strings.TrimPrefix(username, "@")
+	if username == "" {
+		http.Error(w, "missing username", http.StatusBadRequest)
+		return
+	}
+
+	if s.collector == nil {
+		http.Error(w, "collector not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	articles, err := s.collector.FetchTwitterArticles(r.Context(), username)
+	if err != nil && len(articles) == 0 {
+		http.Error(w, fmt.Sprintf("failed to fetch twitter feed: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	feed := rssFeed{
+		Version: "2.0",
+		Channel: rssChannel{
+			Title:         fmt.Sprintf("X: @%s", username),
+			Link:          fmt.Sprintf("https://x.com/%s", username),
+			Description:   fmt.Sprintf("Real-time threat intelligence feed from @%s on X", username),
+			LastBuildDate: time.Now().UTC().Format(time.RFC1123Z),
+		},
+	}
+
+	for _, a := range articles {
+		feed.Channel.Items = append(feed.Channel.Items, rssItem{
+			Title:       a.Title,
+			Link:        a.Link,
+			Description: a.Summary,
+			PubDate:     a.PublishedAt.Format(time.RFC1123Z),
+			Guid:        a.Link,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(xml.Header))
+	_ = xml.NewEncoder(w).Encode(feed)
 }

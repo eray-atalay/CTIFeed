@@ -138,7 +138,7 @@ export default function ThreatFeed() {
     <>
       {/* Araç Çubuğu (Toolbar) */}
       <section class="toolbar-section" aria-label="Arama ve Filtreleme Kontrolleri">
-        <div class="search-box">
+        <div class="search-bar-wrap search-box">
           <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -154,7 +154,7 @@ export default function ThreatFeed() {
           {search && (
             <button
               id="search-clear-btn"
-              class="search-clear-btn"
+              class="search-clear search-clear-btn"
               title="Aramayı Temizle"
               onClick={handleClearSearch}
             >

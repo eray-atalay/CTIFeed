@@ -1,0 +1,14 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import CveRadarModal from '../../components/islands/CveRadarModal';
+---
+
+<Layout title="CTIFeed | CVE Zafiyet Radarı">
+  <div class="page-header-row">
+    <h1 class="page-title">CVE Zafiyet Akışı &amp; Bildirimleri</h1>
+    <p class="page-desc">Telegram kanalları ve global CTI kaynaklarından toplanan tüm CVE güvenlik açıkları[cite: 2].</p>
+  </div>
+
+  <!-- Sayfa içi gömülü zafiyet radarı görünümü için doğrudan modal bileşenini sayfada aktif yüklüyoruz -->
+  <CveRadarModal client:load />
+</Layout>

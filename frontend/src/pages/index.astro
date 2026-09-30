@@ -1,18 +1,20 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import Header from '../components/Header.astro';
 import Metrics from '../components/Metrics.astro';
 import Analytics from '../components/Analytics.astro';
 import ThreatFeed from '../components/islands/ThreatFeed';
-import Modals from '../components/Modals.astro';
+import ArticleModal from '../components/islands/ArticleModal';
 ---
 
-<Layout title="CTIFeed Tehdit Radarı | Siber Tehdit İstihbaratı ve Önceliklendirme">
-  <Header />
-  <main class="main-container">
-    <Metrics />
-    <Analytics />
-    <ThreatFeed client:load />
-  </main>
-  <Modals />
+<Layout title="CTIFeed Tehdit Radarı | Ana Akış">
+  <div class="page-header-row">
+    <h1 class="page-title">Tehdit İstihbarat Akışı</h1>
+    <p class="page-desc">Gerçek zamanlı siber tehdit istihbaratı ve önceliklendirme motoru paneli.</p>
+  </div>
+
+  <Metrics />
+  <Analytics />
+  <ThreatFeed client:load />
+  
+  <ArticleModal client:load />
 </Layout>

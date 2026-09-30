@@ -1,26 +1,20 @@
 ---
-// Header.astro - CTIFeed Tehdit Radarı Üst Bilgi Bileşeni (Astro + Preact Island)
-import HeaderActions from './islands/HeaderActions';
+// Header.astro - Üst Bilgi Başlık Alanı
+interface Props {
+  title: string;
+  subtitle?: string;
+}
+
+const { title, subtitle } = Astro.props;
 ---
 
-<header class="app-header">
-  <div class="header-container">
-    <div class="brand-group">
-      <div class="radar-pulse-icon">
-        <div class="pulse-ring"></div>
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="9"></circle>
-          <path d="M12 3v9l6 6"></path>
-          <circle cx="12" cy="12" r="3" fill="currentColor"></circle>
-        </svg>
-      </div>
-      <div class="brand-text">
-        <h1>CTIFeed <span class="badge-radar">Tehdit Radarı</span></h1>
-        <p class="brand-sub">Gerçek Zamanlı Siber Tehdit İstihbaratı ve Önceliklendirme Motoru</p>
-      </div>
-    </div>
-
-    {/* Reaktif Adalar: Butonlar, Canlı Tarama ve Modallar */}
-    <HeaderActions client:load />
+<header class="content-header">
+  <div class="header-title-wrapper">
+    <h1 class="main-heading">{title}</h1>
+    {subtitle && <p class="sub-heading">{subtitle}</p>}
+  </div>
+  
+  <div class="header-actions-slot">
+    <!-- Sayfaya özel üst eylemler buraya gelebilir -->
   </div>
 </header>

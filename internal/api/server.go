@@ -62,7 +62,34 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		slog.Error("Failed to create static sub-FS", slog.String("error", err.Error()))
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
-	mux.Handle("/", fileServer)
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Eğer istek API ile başlıyorsa yönlendirme yapma
+		if strings.HasPrefix(path, "/api/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		// Kök dizin veya dosya uzantısı içeren istekler (örn: .js, .css, .ico) doğrudan sunulur
+		if path == "/" || path == "" || strings.Contains(path, ".") {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// Çok sayfalı yapımız için fiziksel HTML dosyasını kontrol et (örn: /radars/cve -> /radars/cve.html)
+		htmlPath := strings.TrimPrefix(path, "/") + ".html"
+		if _, err := fs.Stat(staticFS, htmlPath); err == nil {
+			r.URL.Path = path + ".html"
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// Tanımlı alt sayfalardan biri değilse index.html sun (SPA / Router fallback)
+		r.URL.Path = "/index.html"
+		fileServer.ServeHTTP(w, r)
+	})
 
 	s.server = &http.Server{
 		Addr:         addr,
@@ -261,13 +288,13 @@ func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 	minScore, _ := strconv.Atoi(query.Get("min_score"))
 
 	filter := storage.ArticleFilter{
-		Search:   query.Get("search"),
-		Tag:      query.Get("tag"),
-		Source:   query.Get("source"),
-		MinScore: minScore,
-		Limit:    limit,
-		Offset:   offset,
-		SortBy:   query.Get("sort"),
+		Search:    query.Get("search"),
+		Tag:       query.Get("tag"),
+		Source:    query.Get("source"),
+		MinScore:  minScore,
+		Limit:     limit,
+		Offset:    offset,
+		SortBy:    query.Get("sort"),
 		TimeRange: query.Get("time_range"),
 	}
 

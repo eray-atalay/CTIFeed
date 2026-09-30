@@ -1,12 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks';
-import { activeModal, closeModal, formatTimeAgo } from '../../services/store';
+import { formatTimeAgo } from '../../services/store';
 import { fetchArticles } from '../../services/api';
 import type { Article } from '../../types/cti';
 
 export default function CveRadarModal() {
-  const [isOpen, setIsOpen] = useState<boolean>(false);
   const [allArticles, setAllArticles] = useState<Article[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
   const [search, setSearch] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -14,23 +13,7 @@ export default function CveRadarModal() {
   const searchTimerRef = useRef<any>(null);
 
   useEffect(() => {
-    const unsub = activeModal.subscribe((val) => {
-      const open = val === 'cve';
-      setIsOpen(open);
-      if (open) {
-        loadCveData();
-      }
-    });
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeModal();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      unsub();
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+    loadCveData();
   }, []);
 
   const loadCveData = async () => {
@@ -81,124 +64,94 @@ export default function CveRadarModal() {
     return items;
   }, [allArticles, debouncedSearch, sortOrder]);
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      class="modal-overlay"
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) closeModal();
-      }}
-    >
-      <div class="modal-card modal-card-wide" style="max-width: 1050px; height: 85vh;">
-        <button class="modal-close" onClick={closeModal} aria-label="Kapat">&times;</button>
-        <div class="modal-header">
-          <div class="ioc-modal-header-top">
-            <div>
-              <h2>
-                CVE Zafiyet Akışı & Telegram Bildirimleri
-                <span
-                  class="feed-count-badge"
-                  style="background: rgba(244, 63, 94, 0.2); color: #fda4af; font-size: 0.8rem; padding: 2px 8px; border-radius: 6px; margin-left: 8px;"
-                >
-                  {filteredCves.length} zafiyet
-                </span>
-              </h2>
-              <p class="modal-sub">
-                Telegram kanalları ve global CTI kaynaklarından toplanan tüm CVE güvenlik açıkları.
-              </p>
-            </div>
-          </div>
-          <div class="ioc-filters-bar" style="display: flex; gap: 12px; align-items: center;">
-            <input
-              type="text"
-              class="ioc-search-input"
-              placeholder="CVE kodu veya zafiyet adı ara (örn: CVE-2026, Fortinet, RCE)..."
-              value={search}
-              onInput={(e: any) => handleSearchChange(e.target.value)}
-              style="flex: 1;"
-            />
-            <div class="select-wrapper">
-              <select
-                value={sortOrder}
-                onChange={(e: any) => setSortOrder(e.target.value)}
-                style="background: #0e1422; border: 1px solid var(--bg-card-border); color: var(--text-secondary); padding: 7px 12px; border-radius: var(--radius-md); font-size: 0.825rem; cursor: pointer;"
-              >
-                <option value="desc">En Yeni Tarih</option>
-                <option value="asc">En Eski Tarih</option>
-              </select>
-            </div>
-          </div>
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-card-border)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
+      <div className="ioc-filters-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
+        <input
+          type="text"
+          className="ioc-search-input"
+          placeholder="CVE kodu veya zafiyet adı ara (örn: CVE-2026, Fortinet, RCE)..."
+          value={search}
+          onInput={(e: any) => handleSearchChange(e.target.value)}
+          style={{ flex: 1 }}
+        />
+        <div className="select-wrapper">
+          <select
+            value={sortOrder}
+            onChange={(e: any) => setSortOrder(e.target.value)}
+            style={{ background: '#0e1422', border: '1px solid var(--bg-card-border)', color: 'var(--text-secondary)', padding: '7px 12px', borderRadius: 'var(--radius-md)', fontSize: '0.825rem', cursor: 'pointer' }}
+          >
+            <option value="desc">En Yeni Tarih</option>
+            <option value="asc">En Eski Tarih</option>
+          </select>
         </div>
+      </div>
 
-        <div class="ioc-table-container" style="max-height: calc(85vh - 170px);">
-          {loading ? (
-            <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-              CVE kayıtları yükleniyor...
-            </div>
-          ) : (
-            <table class="ioc-table">
-              <thead>
-                <tr>
-                  <th style="width: 150px;">CVE Kodu</th>
-                  <th>Zafiyet & Tehdit Özeti</th>
-                  <th style="width: 190px;">Kaynak</th>
-                  <th style="width: 120px;">Yayınlanma</th>
-                  <th style="width: 80px; text-align: center;">Bağlantı</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCves.map((art) => {
-                  const cveTags = (art.tags || []).filter((t) => t.toUpperCase().startsWith('CVE-'));
-                  const cveLabel = cveTags.length > 0 ? cveTags.join(', ') : 'CVE Bildirimi';
-                  const timeAgo = formatTimeAgo(art.published_at);
+      <div className="ioc-table-container" style={{ maxHeight: '70vh' }}>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+            CVE kayıtları yükleniyor...
+          </div>
+        ) : (
+          <table className="ioc-table">
+            <thead>
+              <tr>
+                <th style={{ width: '150px' }}>CVE Kodu</th>
+                <th>Zafiyet &amp; Tehdit Özeti</th>
+                <th style={{ width: '190px' }}>Kaynak</th>
+                <th style={{ width: '120px' }}>Yayınlanma</th>
+                <th style={{ width: '80px', textAlign: 'center' }}>Bağlantı</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredCves.map((art) => {
+                const cveTags = (art.tags || []).filter((t) => t.toUpperCase().startsWith('CVE-'));
+                const cveLabel = cveTags.length > 0 ? cveTags.join(', ') : 'CVE Bildirimi';
+                const timeAgo = formatTimeAgo(art.published_at);
 
-                  return (
-                    <tr key={art.id}>
-                      <td>
-                        <span class="tag-item tag-cve" style="font-size:0.8rem;">
-                          {cveLabel}
-                        </span>
-                      </td>
-                      <td>
-                        <div style="font-weight: 600; color: #fff; margin-bottom: 4px;">
-                          {art.title}
-                        </div>
-                        <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4;">
-                          {art.summary || ''}
-                        </div>
-                      </td>
-                      <td>
-                        <span class="ioc-source-tag">{art.source}</span>
-                      </td>
-                      <td style="color: var(--text-muted); font-size: 0.8rem;">
-                        {timeAgo}
-                      </td>
-                      <td style="text-align: center;">
-                        <a
-                          href={art.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="btn-link"
-                        >
-                          Rapor &rarr;
-                        </a>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+                return (
+                  <tr key={art.id}>
+                    <td>
+                      <span className="tag-item tag-cve" style={{ fontSize: '0.8rem' }}>
+                        {cveLabel}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600, color: '#fff', marginBottom: '4px' }}>
+                        {art.title}
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                        {art.summary || ''}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="ioc-source-tag">{art.source}</span>
+                    </td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                      {timeAgo}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <a
+                        href={art.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-link"
+                      >
+                        Rapor &rarr;
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
 
-          {!loading && filteredCves.length === 0 && (
-            <div class="ioc-empty-state">
-              <p>Arama kriterine uygun CVE kaydı bulunamadı.</p>
-            </div>
-          )}
-        </div>
+        {!loading && filteredCves.length === 0 && (
+          <div className="ioc-empty-state">
+            <p>Arama kriterine uygun CVE kaydı bulunamadı.</p>
+          </div>
+        )}
       </div>
     </div>
   );

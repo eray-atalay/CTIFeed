@@ -16,11 +16,27 @@ export default function CveRadarModal() {
     loadCveData();
   }, []);
 
+  const isCveNotifyArticle = (a: Article) => {
+    const src = (a.source || '').toLowerCase();
+    // Yalnızca Telegram @cveNotify kanalından gelen veriler kabul edilir.
+    // breachdetect ve diğer CTI kaynakları kesinlikle dahil edilmez.
+    if (src.includes('breachdetect')) return false;
+    return src.includes('cvenotify') || src.includes('cve notify');
+  };
+
   const loadCveData = async () => {
     setLoading(true);
     try {
-      const res = await fetchArticles({ limit: 250, sort: 'date' });
-      setAllArticles(res.articles || []);
+      let res = await fetchArticles({ source: 'cvenotify', limit: 300, sort: 'date' });
+      let list = (res.articles || []).filter(isCveNotifyArticle);
+
+      // Eğer source filtresiyle backend'den kayıt dönmediyse tüm verileri çekip filtrele
+      if (list.length === 0) {
+        const allRes = await fetchArticles({ limit: 300, sort: 'date' });
+        list = (allRes.articles || []).filter(isCveNotifyArticle);
+      }
+
+      setAllArticles(list);
     } catch (err) {
       console.error('CVE verisi alınırken hata:', err);
     } finally {
@@ -37,14 +53,7 @@ export default function CveRadarModal() {
   };
 
   const filteredCves = useMemo(() => {
-    let items = allArticles.filter((a) => {
-      const isTelegram = a.source && a.source.startsWith('Telegram:');
-      const hasCveTag = (a.tags || []).some((t) => t.toUpperCase().startsWith('CVE-'));
-      const hasCveText =
-        (a.title && a.title.toUpperCase().includes('CVE-')) ||
-        (a.summary && a.summary.toUpperCase().includes('CVE-'));
-      return isTelegram || hasCveTag || hasCveText;
-    });
+    let items = allArticles.filter(isCveNotifyArticle);
 
     if (debouncedSearch) {
       items = items.filter(
@@ -66,24 +75,29 @@ export default function CveRadarModal() {
 
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-card-border)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
-      <div className="ioc-filters-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
+      <div className="ioc-filters-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
         <input
           type="text"
           className="ioc-search-input"
           placeholder="CVE kodu veya zafiyet adı ara (örn: CVE-2026, Fortinet, RCE)..."
           value={search}
           onInput={(e: any) => handleSearchChange(e.target.value)}
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: '240px' }}
         />
-        <div className="select-wrapper">
-          <select
-            value={sortOrder}
-            onChange={(e: any) => setSortOrder(e.target.value)}
-            style={{ background: '#0e1422', border: '1px solid var(--bg-card-border)', color: 'var(--text-secondary)', padding: '7px 12px', borderRadius: 'var(--radius-md)', fontSize: '0.825rem', cursor: 'pointer' }}
-          >
-            <option value="desc">En Yeni Tarih</option>
-            <option value="asc">En Eski Tarih</option>
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            Toplam: <strong style={{ color: '#38bdf8' }}>{filteredCves.length}</strong>
+          </span>
+          <div className="select-wrapper">
+            <select
+              value={sortOrder}
+              onChange={(e: any) => setSortOrder(e.target.value)}
+              style={{ background: '#0e1422', border: '1px solid var(--bg-card-border)', color: 'var(--text-secondary)', padding: '7px 12px', borderRadius: 'var(--radius-md)', fontSize: '0.825rem', cursor: 'pointer' }}
+            >
+              <option value="desc">En Yeni Tarih</option>
+              <option value="asc">En Eski Tarih</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -106,7 +120,8 @@ export default function CveRadarModal() {
             <tbody>
               {filteredCves.map((art) => {
                 const cveTags = (art.tags || []).filter((t) => t.toUpperCase().startsWith('CVE-'));
-                const cveLabel = cveTags.length > 0 ? cveTags.join(', ') : 'CVE Bildirimi';
+                const match = (art.title + ' ' + (art.summary || '')).match(/CVE-\d{4}-\d{4,7}/i);
+                const cveLabel = cveTags.length > 0 ? cveTags.join(', ') : (match ? match[0].toUpperCase() : 'CVE Bildirimi');
                 const timeAgo = formatTimeAgo(art.published_at);
 
                 return (
@@ -149,7 +164,7 @@ export default function CveRadarModal() {
 
         {!loading && filteredCves.length === 0 && (
           <div className="ioc-empty-state">
-            <p>Arama kriterine uygun CVE kaydı bulunamadı.</p>
+            <p>Arama kriterine uygun veya @cvenotify kanalından kaydedilmiş CVE bildirimi bulunamadı.</p>
           </div>
         )}
       </div>

@@ -343,7 +343,8 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 			cleanTitle = fmt.Sprintf("[%s] Yeni Tehdit", src.Name)
 		}
 
-		extractedIoCs := ioc.Extract(cleanSummary)
+		// Telegram kaynaklarından IoC toplanması istenmediği için boş bırakılır
+		var extractedIoCs []model.IoC
 		scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
 
 		articles = append(articles, &model.Article{
@@ -640,7 +641,8 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 				categoryTag = "infra-proxy"
 			}
 
-			extractedIoCs := ioc.Extract(rawText)
+			// Telegram kaynaklarından IoC toplanması istenmediği için boş bırakılır
+			var extractedIoCs []model.IoC
 			scoringResult := scorer.Evaluate(title, rawText)
 
 			tags := scoringResult.Tags

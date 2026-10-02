@@ -1,0 +1,13 @@
+---
+import Layout from '../layouts/Layout.astro';
+import IocPoolModal from '../components/islands/IocPoolModal';
+---
+
+<Layout title="CTIFeed | IoC Havuzu">
+  <div class="page-header-row">
+    <h1 class="page-title">Tehdit Göstergeleri (IoC) Havuzu</h1>
+    <p class="page-desc">Toplanan istihbarat haberlerinden otomatik ayıklanan IP, Domain ve Hash kayıtları.</p>
+  </div>
+
+  <IocPoolModal client:load />
+</Layout>

@@ -66,7 +66,34 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		slog.Error("Failed to create static sub-FS", slog.String("error", err.Error()))
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
-	mux.Handle("/", fileServer)
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Eğer istek API ile başlıyorsa yönlendirme yapma
+		if strings.HasPrefix(path, "/api/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		// Kök dizin veya dosya uzantısı içeren istekler (örn: .js, .css, .ico) doğrudan sunulur
+		if path == "/" || path == "" || strings.Contains(path, ".") {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// Çok sayfalı yapımız için fiziksel HTML dosyasını kontrol et (örn: /radars/cve -> /radars/cve.html)
+		htmlPath := strings.TrimPrefix(path, "/") + ".html"
+		if _, err := fs.Stat(staticFS, htmlPath); err == nil {
+			r.URL.Path = path + ".html"
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// Tanımlı alt sayfalardan biri değilse index.html sun (SPA / Router fallback)
+		r.URL.Path = "/index.html"
+		fileServer.ServeHTTP(w, r)
+	})
 
 	s.server = &http.Server{
 		Addr:         addr,

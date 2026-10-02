@@ -131,6 +131,9 @@ func (d *DB) migrate(ctx context.Context) error {
 	// Normalize future timestamps if published_at is ahead of current time
 	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > DATE_ADD(NOW(), INTERVAL 5 MINUTE);")
 
+	// Telegram kaynaklarından IoC toplanmaması gerektiğinden, mevcut Telegram IoC kayıtlarını temizle
+	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs WHERE LOWER(source) LIKE '%telegram%';")
+
 	return nil
 }
 
@@ -407,7 +410,8 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 			}
 		}
 
-		if a.ID > 0 && len(a.IoCs) > 0 {
+		isTelegram := strings.HasPrefix(strings.ToLower(a.Source), "telegram") || strings.Contains(strings.ToLower(a.Source), "telegram")
+		if !isTelegram && a.ID > 0 && len(a.IoCs) > 0 {
 			for _, item := range a.IoCs {
 				val := strings.TrimSpace(item.Value)
 				if val == "" {
@@ -1010,6 +1014,9 @@ func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, sourc
 	if len(iocs) == 0 {
 		return nil
 	}
+	if strings.HasPrefix(strings.ToLower(source), "telegram") || strings.Contains(strings.ToLower(source), "telegram") {
+		return nil
+	}
 
 	stmt, err := d.conn.PrepareContext(ctx, `
 		INSERT IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
@@ -1051,6 +1058,9 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 		whereClauses = append(whereClauses, "i.article_id = ?")
 		args = append(args, filter.ArticleID)
 	}
+
+	// Telegram kaynaklarından gelen göstergeler IoC havuzuna dahil edilmez
+	whereClauses = append(whereClauses, "LOWER(COALESCE(i.source, a.source, '')) NOT LIKE '%telegram%'")
 
 	whereSQL := ""
 	if len(whereClauses) > 0 {
@@ -1178,6 +1188,9 @@ func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []mod
 
 	totalExtracted := 0
 	for _, a := range articles {
+		if strings.HasPrefix(strings.ToLower(a.source), "telegram") || strings.Contains(strings.ToLower(a.source), "telegram") {
+			continue
+		}
 		combinedText := a.title + " " + a.summary
 		extracted := extractFn(combinedText)
 		if len(extracted) > 0 {

@@ -272,3 +272,57 @@ func TestSaveArticlesWithIoCs(t *testing.T) {
 		t.Fatalf("expected 2 iocs saved automatically, got count=%d, len=%d", count, len(iocs))
 	}
 }
+
+func TestTelegramArticlesExcludeIoCs(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	articles := []*model.Article{
+		{
+			Source:      "Telegram: breachdetect",
+			Title:       "Data Leak Alert",
+			Link:        "https://t.me/breachdetect/1234",
+			Summary:     "Victim database leaked with IP 192.0.2.1 and domain evil-leak.com",
+			Score:       80,
+			Tags:        []string{"leak", "darkweb"},
+			PublishedAt: time.Now().Add(-30 * time.Minute),
+			IoCs: []model.IoC{
+				{Type: model.IoCTypeIP, Value: "192.0.2.1"},
+			},
+		},
+	}
+
+	inserted, _, err := db.SaveArticles(ctx, articles)
+	if err != nil {
+		t.Fatalf("SaveArticles failed: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("expected 1 inserted article")
+	}
+
+	// Telegram articles must NOT have their IoCs stored or returned in GetIoCs
+	iocs, count, err := db.GetIoCs(ctx, model.IoCFilter{ArticleID: articles[0].ID})
+	if err != nil {
+		t.Fatalf("GetIoCs failed: %v", err)
+	}
+	if count != 0 || len(iocs) != 0 {
+		t.Fatalf("expected 0 iocs for Telegram source, got count=%d, len=%d", count, len(iocs))
+	}
+
+	// Direct SaveIoCs call on Telegram source should also be ignored
+	err = db.SaveIoCs(ctx, articles[0].ID, "Context", "Telegram: cveNotify", []model.IoC{
+		{Type: model.IoCTypeIP, Value: "10.0.0.1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error on SaveIoCs: %v", err)
+	}
+	iocsAll, countAll, err := db.GetIoCs(ctx, model.IoCFilter{})
+	if err != nil {
+		t.Fatalf("GetIoCs failed: %v", err)
+	}
+	if countAll != 0 || len(iocsAll) != 0 {
+		t.Fatalf("expected total 0 iocs for telegram sources, got count=%d", countAll)
+	}
+}
+

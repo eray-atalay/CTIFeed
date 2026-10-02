@@ -19,10 +19,15 @@ export default function IocPoolModal() {
     loadIocs('', '');
   }, []);
 
+  const isNonTelegramIoC = (i: IoCItem) => {
+    const src = (i.source || '').toLowerCase();
+    return !src.includes('telegram');
+  };
+
   const loadCounts = async () => {
     try {
       const res = await fetchIoCs({ limit: 1000 });
-      const all = res.iocs || [];
+      const all = (res.iocs || []).filter(isNonTelegramIoC);
       setCounts({
         all: all.length,
         ip: all.filter((i) => i.type === 'ip').length,
@@ -43,7 +48,8 @@ export default function IocPoolModal() {
         search: query || undefined,
         limit: 250,
       });
-      setIocs(res.iocs || []);
+      const list = (res.iocs || []).filter(isNonTelegramIoC);
+      setIocs(list);
     } catch (err) {
       console.error('IoC listesi yüklenemedi:', err);
       setIocs([]);

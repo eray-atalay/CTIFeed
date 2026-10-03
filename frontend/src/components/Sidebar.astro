@@ -64,14 +64,20 @@ const currentPath = Astro.url.pathname;
 </aside>
 
 <script>
-  import { triggerScan } from '../services/api';
+  import { triggerScan, isAdminLoggedIn } from '../services/api';
   import { triggerGlobalRefresh } from '../services/store';
 
   const btn = document.getElementById('sidebar-scan-btn');
   const label = document.getElementById('sidebar-scan-label');
   const status = document.getElementById('sidebar-scan-status');
 
-  if (btn) {
+  if (btn) btn.style.display = 'none';
+
+  isAdminLoggedIn().then((adminVisible) => {
+    if (btn) btn.style.display = adminVisible ? 'flex' : 'none';
+    if (!adminVisible && status) status.style.display = 'none';
+    if (!btn || !adminVisible) return;
+
     btn.addEventListener('click', async () => {
       if (btn.disabled) return;
 
@@ -99,7 +105,7 @@ const currentPath = Astro.url.pathname;
         label.textContent = 'Besleme Tara';
       }
     });
-  }
+  });
 
   function showStatus(msg, type) {
     if (!status) return;

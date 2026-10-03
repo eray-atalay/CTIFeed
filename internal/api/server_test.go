@@ -85,6 +85,40 @@ func TestStaticAssetsEndpoints(t *testing.T) {
 	}
 }
 
+func TestAdminOnlyWriteAccess(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	unauthReq := httptest.NewRequest("POST", "/api/scan", nil)
+	unauthRec := httptest.NewRecorder()
+	srv.server.Handler.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without admin credentials for /api/scan, got %d", unauthRec.Code)
+	}
+
+	loginBody := strings.NewReader(fmt.Sprintf(`{"username":%q,"password":%q}`, srv.cfg.AdminUsername, srv.cfg.AdminPassword))
+	loginReq := httptest.NewRequest("POST", "/api/admin/login", loginBody)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	srv.server.Handler.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for admin login, got %d; body=%s", loginRec.Code, loginRec.Body.String())
+	}
+
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != adminTokenCookie || !cookies[0].HttpOnly {
+		t.Fatalf("expected HttpOnly admin JWT cookie, got %+v", cookies)
+	}
+
+	authReq := httptest.NewRequest("POST", "/api/scan", nil)
+	authReq.AddCookie(cookies[0])
+	authRec := httptest.NewRecorder()
+	srv.server.Handler.ServeHTTP(authRec, authReq)
+	if authRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with admin JWT cookie for /api/scan, got %d; body=%s", authRec.Code, authRec.Body.String())
+	}
+}
+
 func TestAPIEndpoints(t *testing.T) {
 	srv, cleanup := setupTestServer(t)
 	defer cleanup()

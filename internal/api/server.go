@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -35,6 +36,18 @@ type Server struct {
 
 // NewServer creates and initializes a new Server instance.
 func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, addr string) *Server {
+	if cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+	if strings.TrimSpace(cfg.AdminJWTSecret) == "" {
+		secret, err := randomJWTSecret()
+		if err != nil {
+			slog.Error("Failed to generate admin JWT secret", slog.String("error", err.Error()))
+		} else {
+			cfg.AdminJWTSecret = secret
+			slog.Warn("CTIFEED_ADMIN_JWT_SECRET is not configured; admin sessions will reset on restart")
+		}
+	}
 	s := &Server{
 		cfg:       cfg,
 		db:        db,
@@ -53,6 +66,9 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	mux.HandleFunc("GET /api/iocs", s.handleGetIoCs)
 	mux.HandleFunc("GET /api/iocs/export", s.handleExportIoCs)
 	mux.HandleFunc("GET /api/sources", s.handleGetSources)
+	mux.HandleFunc("POST /api/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("POST /api/admin/logout", s.handleAdminLogout)
+	mux.HandleFunc("GET /api/admin/status", s.handleGetAdminStatus)
 	mux.HandleFunc("POST /api/sources", s.handleAddSource)
 	mux.HandleFunc("DELETE /api/sources", s.handleDeleteSource)
 	mux.HandleFunc("POST /api/sources/toggle", s.handleToggleSource)
@@ -66,6 +82,14 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		slog.Error("Failed to create static sub-FS", slog.String("error", err.Error()))
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
+	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/admin.html"
+		fileServer.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("GET /admin/", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/admin.html"
+		fileServer.ServeHTTP(w, r)
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -136,7 +160,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -145,6 +169,65 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if s.cfg == nil || s.cfg.AdminJWTSecret == "" {
+		http.Error(w, `{"error": "Server configuration is not available"}`, http.StatusInternalServerError)
+		return false
+	}
+
+	if _, ok := s.adminTokenFromRequest(r); !ok {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "Admin authorization required",
+		})
+		return false
+	}
+
+	return true
+}
+
+func (s *Server) handleGetAdminStatus(w http.ResponseWriter, r *http.Request) {
+	_, isAdmin := s.adminTokenFromRequest(r)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"is_admin":       isAdmin,
+		"requires_admin": true,
+	})
+}
+
+func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUsername)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) != 1 {
+		http.Error(w, `{"error":"Invalid admin credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	token, err := signAdminToken(s.cfg.AdminJWTSecret, req.Username, 8*time.Hour)
+	if err != nil {
+		http.Error(w, `{"error":"Could not create admin session"}`, http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, adminCookie(r, token, 8*60*60))
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true, "is_admin": true})
+}
+
+func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, adminCookie(r, "", -1))
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
 func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
@@ -247,6 +330,10 @@ func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleToggleSource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+
 	var req struct {
 		ID int64 `json:"id"`
 	}
@@ -281,6 +368,9 @@ func (s *Server) handleToggleSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddSource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	if s.db == nil {
 		http.Error(w, `{"error": "Database not initialized"}`, http.StatusInternalServerError)
 		return
@@ -373,6 +463,9 @@ func (s *Server) handleAddSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	if s.db == nil {
 		http.Error(w, `{"error": "Database not initialized"}`, http.StatusInternalServerError)
 		return
@@ -448,6 +541,9 @@ func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	if !s.scanMu.TryLock() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)

@@ -26,14 +26,19 @@ export default function IocPoolModal() {
 
   const loadCounts = async () => {
     try {
-      const res = await fetchIoCs({ limit: 1000 });
-      const all = (res.iocs || []).filter(isNonTelegramIoC);
+      const [all, ip, domain, sha256, md5] = await Promise.all([
+        fetchIoCs({ limit: 1 }),
+        fetchIoCs({ type: 'ip', limit: 1 }),
+        fetchIoCs({ type: 'domain', limit: 1 }),
+        fetchIoCs({ type: 'sha256', limit: 1 }),
+        fetchIoCs({ type: 'md5', limit: 1 }),
+      ]);
       setCounts({
-        all: all.length,
-        ip: all.filter((i) => i.type === 'ip').length,
-        domain: all.filter((i) => i.type === 'domain').length,
-        sha256: all.filter((i) => i.type === 'sha256').length,
-        md5: all.filter((i) => i.type === 'md5').length,
+        all: all.total || 0,
+        ip: ip.total || 0,
+        domain: domain.total || 0,
+        sha256: sha256.total || 0,
+        md5: md5.total || 0,
       });
     } catch (err) {
       console.error('IoC sayıları yüklenemedi:', err);

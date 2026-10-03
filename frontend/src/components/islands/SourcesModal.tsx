@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
-import { fetchSources, toggleSource, addSource, deleteSource } from '../../services/api';
+import { fetchSources, toggleSource, addSource, deleteSource, isAdminLoggedIn } from '../../services/api';
 import type { SourceInfo } from '../../types/cti';
 
 export default function SourcesModal() {
@@ -16,9 +16,11 @@ export default function SourcesModal() {
   const [formSubmitting, setFormSubmitting] = useState<boolean>(false);
   const [formMsg, setFormMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   useEffect(() => {
     loadSources();
+    isAdminLoggedIn().then(setIsAdmin);
   }, []);
 
   const loadSources = () => {
@@ -141,20 +143,22 @@ export default function SourcesModal() {
           onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
           style={{ width: '100%', maxWidth: '340px', fontSize: '0.85rem', padding: '7px 12px', background: 'rgba(14,20,34,0.6)', border: '1px solid var(--bg-card-border)', borderRadius: '6px', color: 'var(--text-base)' }}
         />
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            setShowAddForm(!showAddForm);
-            setFormMsg(null);
-          }}
-          style={{ padding: '7px 14px', fontSize: '0.82rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-        >
-          {showAddForm ? '✕ Formu Kapat' : '＋ Yeni X / RSS Kaynağı Ekle'}
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setShowAddForm(!showAddForm);
+              setFormMsg(null);
+            }}
+            style={{ padding: '7px 14px', fontSize: '0.82rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+          >
+            {showAddForm ? '✕ Formu Kapat' : '＋ Yeni X / RSS Kaynağı Ekle'}
+          </button>
+        )}
       </div>
 
-      {showAddForm && (
+      {isAdmin && showAddForm && (
         <div style={{ margin: '14px 0 18px 0', padding: '16px', background: 'rgba(15, 23, 42, 0.7)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '8px' }}>
           <div style={{ display: 'flex', gap: '16px', marginBottom: '12px', alignItems: 'center' }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)' }}>Kaynak Tipi:</span>
@@ -306,7 +310,7 @@ export default function SourcesModal() {
                 </div>
 
                 <div className="source-actions-group">
-                  {src.id && (
+                  {isAdmin && src.id && (
                     <label
                       className="source-toggle-switch"
                       title={isActive ? 'Beslemeyi Devre Dışı Bırak' : 'Beslemeyi Etkinleştir'}
@@ -330,7 +334,7 @@ export default function SourcesModal() {
                   >
                     XML &rarr;
                   </a>
-                  {src.id && (
+                  {isAdmin && src.id && (
                     <button
                       type="button"
                       className="btn-icon"

@@ -1067,7 +1067,7 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs i %s;", whereSQL)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs i LEFT JOIN articles a ON i.article_id = a.id %s;", whereSQL)
 	var totalCount int
 	if err := d.conn.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("count iocs failed: %w", err)

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "astro build && node -e \"const fs=require('fs'); const path=require('path'); const src=path.resolve('dist'); const dst=path.resolve('../web/dist'); fs.rmSync(dst,{recursive:true,force:true}); fs.cpSync(src,dst,{recursive:true});\"",
     "preview": "astro preview",
     "astro": "astro"
   },

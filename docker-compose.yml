@@ -38,6 +38,7 @@ services:
       - DB_USER=ctifeed
       - DB_PASSWORD=ctifeed_secret
       - DB_NAME=ctifeed
+      - CTIFEED_ADMIN_JWT_SECRET=${CTIFEED_ADMIN_JWT_SECRET}
       - INTERVAL=15m
       - WORKERS=5
       - TIMEOUT=10s

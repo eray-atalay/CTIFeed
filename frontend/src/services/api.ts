@@ -11,6 +11,31 @@ import type {
   IoCItem
 } from '../types/cti';
 
+export async function verifyAdminCredentials(username: string, password: string): Promise<boolean> {
+  const res = await fetch('/api/admin/login', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  return res.ok;
+}
+
+export async function isAdminLoggedIn(): Promise<boolean> {
+  const res = await fetch('/api/admin/status', { credentials: 'same-origin' });
+  if (!res.ok) return false;
+  const data = await res.json() as { is_admin?: boolean };
+  return Boolean(data.is_admin);
+}
+
+export async function clearAdminSession(): Promise<void> {
+  await fetch('/api/admin/logout', { method: 'POST', credentials: 'same-origin' });
+}
+
+async function fetchWithAdminAuth(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, { ...init, credentials: 'same-origin' });
+}
+
 export async function fetchStats(): Promise<ThreatStats> {
   const res = await fetch('/api/stats');
   if (!res.ok) throw new Error('İstatistik isteği başarısız oldu');
@@ -59,23 +84,29 @@ export async function fetchIoCs(params: { type?: string; search?: string; limit?
 }
 
 export async function triggerScan(): Promise<ScanResponse> {
-  const res = await fetch('/api/scan', { method: 'POST' });
-  if (!res.ok) throw new Error('Tarama döngüsü başlatılamadı');
+  const res = await fetchWithAdminAuth('/api/scan', { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Tarama döngüsü başlatılamadı');
+  }
   return res.json();
 }
 
 export async function toggleSource(id: number): Promise<{ success: boolean; id: number; is_active: boolean }> {
-  const res = await fetch('/api/sources/toggle', {
+  const res = await fetchWithAdminAuth('/api/sources/toggle', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id }),
   });
-  if (!res.ok) throw new Error('Kaynak durumu güncellenemedi');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Kaynak durumu güncellenemedi');
+  }
   return res.json();
 }
 
 export async function addSource(data: { name?: string; url: string; category?: string }): Promise<{ success: boolean; source: SourceInfo }> {
-  const res = await fetch('/api/sources', {
+  const res = await fetchWithAdminAuth('/api/sources', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -88,9 +119,12 @@ export async function addSource(data: { name?: string; url: string; category?: s
 }
 
 export async function deleteSource(id: number): Promise<{ success: boolean; id: number }> {
-  const res = await fetch(`/api/sources?id=${id}`, {
+  const res = await fetchWithAdminAuth(`/api/sources?id=${id}`, {
     method: 'DELETE',
   });
-  if (!res.ok) throw new Error('Kaynak silinemedi');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Kaynak silinemedi');
+  }
   return res.json();
 }

@@ -63,51 +63,51 @@ const currentPath = Astro.url.pathname;
   </div>
 </aside>
 
-<script is:inline>
-(function () {
-  var btn = document.getElementById('sidebar-scan-btn');
-  var label = document.getElementById('sidebar-scan-label');
-  var icon = document.getElementById('sidebar-scan-icon');
-  var status = document.getElementById('sidebar-scan-status');
-  if (!btn) return;
+<script>
+  import { triggerScan } from '../services/api';
+  import { triggerGlobalRefresh } from '../services/store';
 
-  btn.addEventListener('click', function () {
-    if (btn.disabled) return;
-    btn.disabled = true;
-    btn.classList.add('scanning');
-    label.textContent = 'Taranıyor...';
-    status.style.display = 'none';
+  const btn = document.getElementById('sidebar-scan-btn');
+  const label = document.getElementById('sidebar-scan-label');
+  const status = document.getElementById('sidebar-scan-status');
 
-    fetch('/api/scan', { method: 'POST' })
-      .then(function (res) {
-        if (res.status === 409) {
-          return { inserted: 0, skipped: 0, _conflict: true };
-        }
-        return res.json();
-      })
-      .then(function (data) {
-        if (data._conflict) {
-          showStatus('⚠ Zaten devam eden bir tarama var.', 'warn');
-        } else {
-          var msg = '✓ ' + (data.inserted || 0) + ' yeni, ' + (data.skipped || 0) + ' atlandı';
-          showStatus(msg, 'ok');
-        }
-      })
-      .catch(function () {
-        showStatus('✗ Tarama başarısız oldu', 'err');
-      })
-      .finally(function () {
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+
+      btn.disabled = true;
+      btn.classList.add('scanning');
+      label.textContent = 'Taranıyor...';
+      status.style.display = 'none';
+
+      try {
+        const result = await triggerScan();
+        const newInserted = Number(result.new_inserted ?? 0);
+        const duplicatesSkipped = Number(result.duplicates_skipped ?? 0);
+
+        showStatus(`✓ ${newInserted} yeni, ${duplicatesSkipped} atlandı`, 'ok');
+        triggerGlobalRefresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Tarama başarısız oldu';
+        const displayMessage = message.includes('409') || message.toLowerCase().includes('already')
+          ? '⚠ Zaten devam eden bir tarama var.'
+          : '✗ Tarama başarısız oldu';
+        showStatus(displayMessage, 'warn');
+      } finally {
         btn.disabled = false;
         btn.classList.remove('scanning');
         label.textContent = 'Besleme Tara';
-      });
-  });
+      }
+    });
+  }
 
   function showStatus(msg, type) {
+    if (!status) return;
     status.textContent = msg;
     status.className = 'nav-scan-status nav-scan-status--' + type;
     status.style.display = 'block';
-    setTimeout(function () { status.style.display = 'none'; }, 5000);
+    setTimeout(() => {
+      status.style.display = 'none';
+    }, 5000);
   }
-})();
 </script>

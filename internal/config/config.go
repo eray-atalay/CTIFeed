@@ -3,6 +3,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"ctifeed/internal/model"
@@ -25,6 +27,9 @@ type Config struct {
 	TopArticles      int
 	MinScore         int
 	UserAgent        string
+	AdminUsername    string
+	AdminPassword    string
+	AdminJWTSecret   string
 	TelegramToken    string
 	TwitterAuthToken string
 	TwitterCT0       string
@@ -95,24 +100,34 @@ func DefaultSources() []model.FeedSource {
 	}
 }
 
+func envOrDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
 // NewDefaultConfig initializes the default configuration settings.
 func NewDefaultConfig() *Config {
 	return &Config{
-		Sources:       DefaultSources(),
-		MySQLDSN:      "",
-		DBHost:        "127.0.0.1",
-		DBPort:        "3306",
-		DBUser:        "ctifeed",
-		DBPassword:    "ctifeed_secret",
-		DBName:        "ctifeed",
-		Workers:       5,
-		Timeout:       10 * time.Second,
-		Interval:      15 * time.Minute,
-		MaxAgeHours:   7 * 24 * time.Hour,
-		DaemonMode:    false,
-		TopArticles:   10,
-		MinScore:      0,
-		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-		TelegramToken: "",
+		Sources:        DefaultSources(),
+		MySQLDSN:       "",
+		DBHost:         "127.0.0.1",
+		DBPort:         "3306",
+		DBUser:         "ctifeed",
+		DBPassword:     "ctifeed_secret",
+		DBName:         "ctifeed",
+		Workers:        5,
+		Timeout:        10 * time.Second,
+		Interval:       15 * time.Minute,
+		MaxAgeHours:    7 * 24 * time.Hour,
+		DaemonMode:     false,
+		TopArticles:    10,
+		MinScore:       0,
+		UserAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+		AdminUsername:  envOrDefault("CTIFEED_ADMIN_USERNAME", "admin"),
+		AdminPassword:  envOrDefault("CTIFEED_ADMIN_PASSWORD", "ChangeMeNow!"),
+		AdminJWTSecret: envOrDefault("CTIFEED_ADMIN_JWT_SECRET", ""),
+		TelegramToken:  "",
 	}
 }

@@ -273,6 +273,41 @@ func TestSaveArticlesWithIoCs(t *testing.T) {
 	}
 }
 
+func TestGetIoCsWithSourceFilterUsesArticleJoin(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	articles := []*model.Article{
+		{
+			Source:      "BleepingComputer",
+			Title:       "Weighted malware infrastructure update",
+			Link:        "https://www.bleepingcomputer.com/news/security/source-filter-ioc-test",
+			Summary:     "Malicious IP 203.0.113.44 was observed during the campaign.",
+			Score:       56,
+			Tags:        []string{"malware"},
+			PublishedAt: time.Now().Add(-10 * time.Minute),
+			IoCs:        []model.IoC{{Type: model.IoCTypeIP, Value: "203.0.113.44"}},
+		},
+	}
+
+	inserted, _, err := db.SaveArticles(ctx, articles)
+	if err != nil {
+		t.Fatalf("SaveArticles failed: %v", err)
+	}
+	if inserted != 1 {
+		t.Fatalf("expected 1 inserted article, got %d", inserted)
+	}
+
+	_, total, err := db.GetIoCs(ctx, model.IoCFilter{Limit: 10, Search: "203.0.113.44"})
+	if err != nil {
+		t.Fatalf("GetIoCs should succeed with source-compatible filters: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected 1 filtered IOC, got %d", total)
+	}
+}
+
 func TestTelegramArticlesExcludeIoCs(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()
@@ -325,4 +360,3 @@ func TestTelegramArticlesExcludeIoCs(t *testing.T) {
 		t.Fatalf("expected total 0 iocs for telegram sources, got count=%d", countAll)
 	}
 }
-

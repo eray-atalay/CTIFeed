@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"html"
 	"time"
 
 	"github.com/mmcdole/gofeed"

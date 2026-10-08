@@ -42,6 +42,17 @@ const currentPath = Astro.url.pathname;
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
       <span>Kaynaklar</span>
     </a>
+
+    <!-- Manuel Tarama Butonu -->
+    <div class="nav-scan-divider"></div>
+    <button id="sidebar-scan-btn" class="nav-scan-btn" title="Tüm aktif besleme kaynaklarını şimdi tara">
+      <svg id="sidebar-scan-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+      </svg>
+      <span id="sidebar-scan-label">Besleme Tara</span>
+    </button>
+    <div id="sidebar-scan-status" class="nav-scan-status" style="display:none"></div>
   </nav>
 
   <div class="sidebar-footer">
@@ -51,3 +62,58 @@ const currentPath = Astro.url.pathname;
     </a>
   </div>
 </aside>
+
+<script>
+  import { triggerScan, isAdminLoggedIn } from '../services/api';
+  import { triggerGlobalRefresh } from '../services/store';
+
+  const btn = document.getElementById('sidebar-scan-btn');
+  const label = document.getElementById('sidebar-scan-label');
+  const status = document.getElementById('sidebar-scan-status');
+
+  if (btn) btn.style.display = 'none';
+
+  isAdminLoggedIn().then((adminVisible) => {
+    if (btn) btn.style.display = adminVisible ? 'flex' : 'none';
+    if (!adminVisible && status) status.style.display = 'none';
+    if (!btn || !adminVisible) return;
+
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+
+      btn.disabled = true;
+      btn.classList.add('scanning');
+      label.textContent = 'Taranıyor...';
+      status.style.display = 'none';
+
+      try {
+        const result = await triggerScan();
+        const newInserted = Number(result.new_inserted ?? 0);
+        const duplicatesSkipped = Number(result.duplicates_skipped ?? 0);
+
+        showStatus(`✓ ${newInserted} yeni, ${duplicatesSkipped} atlandı`, 'ok');
+        triggerGlobalRefresh();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Tarama başarısız oldu';
+        const displayMessage = message.includes('409') || message.toLowerCase().includes('already')
+          ? '⚠ Zaten devam eden bir tarama var.'
+          : '✗ Tarama başarısız oldu';
+        showStatus(displayMessage, 'warn');
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('scanning');
+        label.textContent = 'Besleme Tara';
+      }
+    });
+  });
+
+  function showStatus(msg, type) {
+    if (!status) return;
+    status.textContent = msg;
+    status.className = 'nav-scan-status nav-scan-status--' + type;
+    status.style.display = 'block';
+    setTimeout(() => {
+      status.style.display = 'none';
+    }, 5000);
+  }
+</script>

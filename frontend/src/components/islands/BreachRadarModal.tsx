@@ -167,150 +167,182 @@ export default function BreachRadarModal() {
   }, [allArticles, selectedCategory, debouncedSearch, sortOrder]);
 
   return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-card-border)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px', padding: '4px 0' }}>
-        {CATEGORIES.map((cat) => {
-          const active = selectedCategory === cat.id;
-          return (
-            <button
-              key={cat.id}
-              type="button"
-              onClick={() => setSelectedCategory(cat.id)}
-              style={{
-                fontSize: '0.78rem',
-                padding: '5px 11px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                border: active ? '1px solid #3b82f6' : '1px solid var(--bg-card-border)',
-                background: active ? '#1e3a5f' : '#182030',
-                color: active ? '#fff' : 'var(--text-secondary)',
-                fontWeight: active ? '600' : '500',
-              }}
-            >
-              {cat.label}
-            </button>
-          );
-        })}
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '20px', paddingBottom: '40px' }}>
+      {/* Üst Bilgi ve Filtreleme Kartı (CVE Radarı Tarzı) */}
+      <div style={{ background: 'linear-gradient(135deg, rgba(14, 20, 34, 0.9) 0%, rgba(10, 15, 26, 0.95) 100%)', border: '1px solid rgba(56, 189, 248, 0.15)', borderRadius: 'var(--radius-lg)', padding: '24px', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)' }}>
+        <div style={{ marginBottom: '16px' }}>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#fff', margin: '0 0 6px 0', letterSpacing: '-0.02em' }}>
+            Dark Web &amp; Sızıntı Radarı
+          </h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>
+            Telegram @breachdetect kanalından anlık toplanan kurumsal veri sızıntıları ve fidye yazılımı vakaları.
+          </p>
+        </div>
 
-      <div className="ioc-filters-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
-        <input
-          type="text"
-          className="ioc-search-input"
-          placeholder="Hedef kurum, domain, dark web forumu veya aktör ara..."
-          value={search}
-          onInput={(e: any) => handleSearchChange(e.target.value)}
-          style={{ flex: 1 }}
-        />
-        <div className="select-wrapper">
-          <select
-            value={sortOrder}
-            onChange={(e: any) => setSortOrder(e.target.value)}
-            style={{ background: '#0e1422', border: '1px solid var(--bg-card-border)', color: 'var(--text-secondary)', padding: '7px 12px', borderRadius: 'var(--radius-md)', fontSize: '0.825rem', cursor: 'pointer' }}
-          >
-            <option value="desc">En Yeni Tarih</option>
-            <option value="asc">En Eski Tarih</option>
-          </select>
+        {/* Kategori Butonları */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px', paddingBottom: '14px', borderBottom: '1px solid rgba(56, 189, 248, 0.1)' }}>
+          {CATEGORIES.map((cat) => {
+            const active = selectedCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setSelectedCategory(cat.id)}
+                style={{
+                  fontSize: '0.8rem',
+                  padding: '6px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  border: active ? '1px solid #38bdf8' : '1px solid var(--bg-card-border)',
+                  background: active ? 'rgba(56, 189, 248, 0.15)' : '#070b14',
+                  color: active ? '#38bdf8' : 'var(--text-secondary)',
+                  fontWeight: active ? '600' : '500',
+                  outline: 'none',
+                }}
+              >
+                {cat.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Arama ve Sıralama Çubuğu */}
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '280px' }}>
+            <input
+              type="text"
+              className="ioc-search-input"
+              placeholder="Hedef kurum, domain, dark web forumu veya aktör ara..."
+              value={search}
+              onInput={(e: any) => handleSearchChange(e.target.value)}
+              style={{ width: '100%', padding: '11px 16px', background: '#070b14', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 'var(--radius-md)', color: '#fff', fontSize: '0.9rem', outline: 'none' }}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div style={{ background: 'rgba(56, 189, 248, 0.08)', padding: '8px 14px', borderRadius: 'var(--radius-md)', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
+              <span style={{ fontSize: '0.825rem', color: 'var(--text-muted)' }}>Toplam Kayıt: </span>
+              <strong style={{ color: '#38bdf8', fontSize: '0.9rem', marginLeft: '4px' }}>{filteredBreaches.length}</strong>
+            </div>
+            <div className="select-wrapper">
+              <select
+                value={sortOrder}
+                onChange={(e: any) => setSortOrder(e.target.value)}
+                style={{ background: '#070b14', border: '1px solid rgba(56, 189, 248, 0.2)', color: 'var(--text-secondary)', padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
+              >
+                <option value="desc">En Yeni Tarih</option>
+                <option value="asc">En Eski Tarih</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="ioc-table-container" style={{ maxHeight: '70vh' }}>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-            Dark Web ve sızıntı kayıtları yükleniyor...
-          </div>
-        ) : (
-          <table className="ioc-table">
-            <thead>
-              <tr>
-                <th style={{ width: '155px' }}>Kategori</th>
-                <th>Hedef Kurum &amp; Dark Web Özeti</th>
-                <th style={{ width: '200px' }}>Kaynak &amp; Forum</th>
-                <th style={{ width: '110px' }}>Yayınlanma</th>
-                <th style={{ width: '80px', textAlign: 'center' }}>Bağlantı</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredBreaches.map((art) => {
-                const timeAgo = formatTimeAgo(art.published_at);
-                const catInfo = getCategoryInfo(art);
-                const { forum, actor } = getForumAndActor(art);
+      {/* Tablo Kartı */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-card-border)', borderRadius: 'var(--radius-lg)', width: '100%', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)' }}>
+        <div style={{ width: '100%', overflowX: 'auto' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
+              Dark Web ve sızıntı kayıtları güvenli belleğe yükleniyor...
+            </div>
+          ) : (
+            <table className="ioc-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', tableLayout: 'fixed' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--bg-card-border)', background: 'rgba(14, 20, 34, 0.6)' }}>
+                  <th style={{ width: '170px', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Kategori</th>
+                  <th style={{ padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Hedef Kurum &amp; Dark Web Özeti</th>
+                  <th style={{ width: '190px', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Kaynak &amp; Forum</th>
+                  <th style={{ width: '120px', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Yayınlanma</th>
+                  <th style={{ width: '100px', textAlign: 'center', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Bağlantı</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBreaches.map((art) => {
+                  const timeAgo = formatTimeAgo(art.published_at);
+                  const catInfo = getCategoryInfo(art);
+                  const { forum, actor } = getForumAndActor(art);
 
-                return (
-                  <tr key={art.id || art.link}>
-                    <td>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          fontSize: '0.72rem',
-                          fontWeight: '600',
-                          padding: '3px 8px',
-                          borderRadius: '4px',
-                          background: catInfo.bg,
-                          color: catInfo.color,
-                          border: `1px solid ${catInfo.border}`,
-                          letterSpacing: '0.02em',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {catInfo.label}
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600, color: '#fff', marginBottom: '4px', fontSize: '0.88rem' }}>
-                        {art.title}
-                      </div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: '1.4', wordBreak: 'break-word' }}>
-                        {art.summary || ''}
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-                        <span className="ioc-source-tag" style={{ fontSize: '0.72rem' }}>{art.source}</span>
-                        {forum && (
-                          <span
-                            style={{ fontSize: '0.7rem', color: '#cbd5e1', background: 'rgba(255,255,255,0.08)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.12)' }}
-                            title="Dark Web Forum Kaynağı"
-                          >
-                            🌐 {forum}
-                          </span>
-                        )}
-                        {actor && (
-                          <span
-                            style={{ fontSize: '0.68rem', color: '#fdba74', background: 'rgba(251,146,60,0.12)', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(251,146,60,0.25)' }}
-                            title="Tehdit Aktörü / Yazar"
-                          >
-                            👤 {actor}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
-                      {timeAgo}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <a
-                        href={art.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="btn-link"
-                      >
-                        Kanal &rarr;
-                      </a>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+                  return (
+                    <tr 
+                      key={art.id || art.link}
+                      style={{ borderBottom: '1px solid var(--bg-card-border)', transition: 'background-color 0.15s ease' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.03)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            fontSize: '0.75rem',
+                            fontWeight: '600',
+                            padding: '5px 10px',
+                            borderRadius: '4px',
+                            background: catInfo.bg,
+                            color: catInfo.color,
+                            border: `1px solid ${catInfo.border}`,
+                            letterSpacing: '0.02em',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {catInfo.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
+                        <div style={{ fontWeight: 600, color: '#fff', marginBottom: '6px', fontSize: '0.9rem', lineHeight: '1.35' }}>
+                          {art.title}
+                        </div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4', wordBreak: 'break-word', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {art.summary || ''}
+                        </div>
+                      </td>
+                      <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' }}>
+                          <span className="ioc-source-tag" style={{ fontSize: '0.78rem', padding: '4px 8px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px' }}>{art.source}</span>
+                          {forum && (
+                            <span
+                              style={{ fontSize: '0.72rem', color: '#cbd5e1', background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.12)' }}
+                              title="Dark Web Forum Kaynağı"
+                            >
+                              🌐 {forum}
+                            </span>
+                          )}
+                          {actor && (
+                            <span
+                              style={{ fontSize: '0.7rem', color: '#fdba74', background: 'rgba(251,146,60,0.12)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(251,146,60,0.25)' }}
+                              title="Tehdit Aktörü / Yazar"
+                            >
+                              👤 {actor}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '16px 20px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                        {timeAgo}
+                      </td>
+                      <td style={{ textAlign: 'center', padding: '16px 20px', verticalAlign: 'middle' }}>
+                        <a
+                          href={art.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn-link"
+                          style={{ fontSize: '0.85rem', fontWeight: 500, color: '#38bdf8', textDecoration: 'none' }}
+                        >
+                          Kanal &rarr;
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
 
-        {!loading && filteredBreaches.length === 0 && (
-          <div className="ioc-empty-state">
-            <p>Seçilen kategori veya arama kriterine uygun dark web / sızıntı kaydı bulunamadı.</p>
-          </div>
-        )}
+          {!loading && filteredBreaches.length === 0 && (
+            <div className="ioc-empty-state" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+              <p>Seçilen kategori veya arama kriterine uygun dark web / sızıntı kaydı bulunamadı.</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

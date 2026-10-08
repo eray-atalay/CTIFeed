@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -34,6 +36,18 @@ type Server struct {
 
 // NewServer creates and initializes a new Server instance.
 func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, addr string) *Server {
+	if cfg == nil {
+		cfg = config.NewDefaultConfig()
+	}
+	if strings.TrimSpace(cfg.AdminJWTSecret) == "" {
+		secret, err := randomJWTSecret()
+		if err != nil {
+			slog.Error("Failed to generate admin JWT secret", slog.String("error", err.Error()))
+		} else {
+			cfg.AdminJWTSecret = secret
+			slog.Warn("CTIFEED_ADMIN_JWT_SECRET is not configured; admin sessions will reset on restart")
+		}
+	}
 	s := &Server{
 		cfg:       cfg,
 		db:        db,
@@ -52,9 +66,15 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	mux.HandleFunc("GET /api/iocs", s.handleGetIoCs)
 	mux.HandleFunc("GET /api/iocs/export", s.handleExportIoCs)
 	mux.HandleFunc("GET /api/sources", s.handleGetSources)
+	mux.HandleFunc("POST /api/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("POST /api/admin/logout", s.handleAdminLogout)
+	mux.HandleFunc("GET /api/admin/status", s.handleGetAdminStatus)
+	mux.HandleFunc("POST /api/sources", s.handleAddSource)
+	mux.HandleFunc("DELETE /api/sources", s.handleDeleteSource)
 	mux.HandleFunc("POST /api/sources/toggle", s.handleToggleSource)
 	mux.HandleFunc("GET /api/articles", s.handleGetArticles)
 	mux.HandleFunc("POST /api/scan", s.handlePostScan)
+	mux.HandleFunc("GET /api/rss/twitter/{username}", s.handleGetTwitterRSS)
 
 	// Static asset file server from embedded assets
 	staticFS, err := fs.Sub(web.Assets, "dist")
@@ -62,6 +82,14 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		slog.Error("Failed to create static sub-FS", slog.String("error", err.Error()))
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
+	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/admin.html"
+		fileServer.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("GET /admin/", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/admin.html"
+		fileServer.ServeHTTP(w, r)
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -131,8 +159,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -141,6 +169,65 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if s.cfg == nil || s.cfg.AdminJWTSecret == "" {
+		http.Error(w, `{"error": "Server configuration is not available"}`, http.StatusInternalServerError)
+		return false
+	}
+
+	if _, ok := s.adminTokenFromRequest(r); !ok {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "Admin authorization required",
+		})
+		return false
+	}
+
+	return true
+}
+
+func (s *Server) handleGetAdminStatus(w http.ResponseWriter, r *http.Request) {
+	_, isAdmin := s.adminTokenFromRequest(r)
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"is_admin":       isAdmin,
+		"requires_admin": true,
+	})
+}
+
+func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.cfg.AdminUsername)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(req.Password), []byte(s.cfg.AdminPassword)) != 1 {
+		http.Error(w, `{"error":"Invalid admin credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	token, err := signAdminToken(s.cfg.AdminJWTSecret, req.Username, 8*time.Hour)
+	if err != nil {
+		http.Error(w, `{"error":"Could not create admin session"}`, http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, adminCookie(r, token, 8*60*60))
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true, "is_admin": true})
+}
+
+func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, adminCookie(r, "", -1))
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
 func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
@@ -243,6 +330,10 @@ func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleToggleSource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+
 	var req struct {
 		ID int64 `json:"id"`
 	}
@@ -273,6 +364,139 @@ func (s *Server) handleToggleSource(w http.ResponseWriter, r *http.Request) {
 		"success":   true,
 		"id":        req.ID,
 		"is_active": newActive,
+	})
+}
+
+func (s *Server) handleAddSource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if s.db == nil {
+		http.Error(w, `{"error": "Database not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		Name     string `json:"name"`
+		URL      string `json:"url"`
+		Category string `json:"category"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error": "Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	rawURL := strings.TrimSpace(req.URL)
+	if rawURL == "" {
+		http.Error(w, `{"error": "URL veya kullanici adi zorunludur"}`, http.StatusBadRequest)
+		return
+	}
+
+	var finalURL string
+	var finalName string
+	finalCategory := strings.TrimSpace(req.Category)
+
+	isTwitter := strings.HasPrefix(rawURL, "@") ||
+		strings.HasPrefix(rawURL, "twitter://") ||
+		strings.HasPrefix(rawURL, "x://") ||
+		strings.Contains(rawURL, "x.com/") ||
+		strings.Contains(rawURL, "twitter.com/") ||
+		strings.Contains(rawURL, "/api/rss/twitter/")
+
+	if isTwitter {
+		username := rawURL
+		username = strings.TrimPrefix(username, "@")
+		username = strings.TrimPrefix(username, "twitter://")
+		username = strings.TrimPrefix(username, "x://")
+		username = strings.TrimPrefix(username, "https://x.com/")
+		username = strings.TrimPrefix(username, "http://x.com/")
+		username = strings.TrimPrefix(username, "https://twitter.com/")
+		username = strings.TrimPrefix(username, "http://twitter.com/")
+		if idx := strings.Index(username, "/api/rss/twitter/"); idx != -1 {
+			username = username[idx+len("/api/rss/twitter/"):]
+		}
+		username = strings.Trim(username, "/")
+		if idx := strings.Index(username, "?"); idx != -1 {
+			username = username[:idx]
+		}
+		if username == "" {
+			http.Error(w, `{"error": "Gecersiz Twitter kullanici adi"}`, http.StatusBadRequest)
+			return
+		}
+		finalURL = fmt.Sprintf("http://localhost:8080/api/rss/twitter/%s", username)
+		if strings.TrimSpace(req.Name) != "" {
+			finalName = strings.TrimSpace(req.Name)
+		} else {
+			finalName = "X: @" + username
+		}
+		if finalCategory == "" {
+			finalCategory = "Twitter Threat Intel"
+		}
+	} else {
+		finalURL = rawURL
+		if !strings.HasPrefix(finalURL, "http://") && !strings.HasPrefix(finalURL, "https://") && !strings.HasPrefix(finalURL, "telegram://") {
+			finalURL = "https://" + finalURL
+		}
+		if strings.TrimSpace(req.Name) != "" {
+			finalName = strings.TrimSpace(req.Name)
+		} else {
+			finalName = finalURL
+		}
+		if finalCategory == "" {
+			finalCategory = "Custom RSS"
+		}
+	}
+
+	newSrc, err := s.db.AddSource(r.Context(), finalName, finalURL, finalCategory)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"source":  newSrc,
+	})
+}
+
+func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if s.db == nil {
+		http.Error(w, `{"error": "Database not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		var req struct {
+			ID int64 `json:"id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.ID > 0 {
+			idStr = strconv.FormatInt(req.ID, 10)
+		}
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, `{"error": "Invalid source ID"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.db.DeleteSource(r.Context(), id); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"id":      id,
 	})
 }
 
@@ -317,6 +541,9 @@ func (s *Server) handleGetArticles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePostScan(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
 	if !s.scanMu.TryLock() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
@@ -390,4 +617,77 @@ func (s *Server) TriggerScan(ctx context.Context) (int, int, error) {
 		}
 	}
 	return inserted, skipped, err
+}
+
+type rssItem struct {
+	XMLName     xml.Name `xml:"item"`
+	Title       string   `xml:"title"`
+	Link        string   `xml:"link"`
+	Description string   `xml:"description"`
+	PubDate     string   `xml:"pubDate"`
+	Guid        string   `xml:"guid"`
+}
+
+type rssChannel struct {
+	XMLName       xml.Name  `xml:"channel"`
+	Title         string    `xml:"title"`
+	Link          string    `xml:"link"`
+	Description   string    `xml:"description"`
+	LastBuildDate string    `xml:"lastBuildDate"`
+	Items         []rssItem `xml:"item"`
+}
+
+type rssFeed struct {
+	XMLName xml.Name   `xml:"rss"`
+	Version string     `xml:"version,attr"`
+	Channel rssChannel `xml:"channel"`
+}
+
+func (s *Server) handleGetTwitterRSS(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	if username == "" {
+		username = r.URL.Query().Get("user")
+	}
+	username = strings.TrimSpace(username)
+	username = strings.TrimPrefix(username, "@")
+	if username == "" {
+		http.Error(w, "missing username", http.StatusBadRequest)
+		return
+	}
+
+	if s.collector == nil {
+		http.Error(w, "collector not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	articles, err := s.collector.FetchTwitterArticles(r.Context(), username)
+	if err != nil && len(articles) == 0 {
+		http.Error(w, fmt.Sprintf("failed to fetch twitter feed: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	feed := rssFeed{
+		Version: "2.0",
+		Channel: rssChannel{
+			Title:         fmt.Sprintf("X: @%s", username),
+			Link:          fmt.Sprintf("https://x.com/%s", username),
+			Description:   fmt.Sprintf("Real-time threat intelligence feed from @%s on X", username),
+			LastBuildDate: time.Now().UTC().Format(time.RFC1123Z),
+		},
+	}
+
+	for _, a := range articles {
+		feed.Channel.Items = append(feed.Channel.Items, rssItem{
+			Title:       a.Title,
+			Link:        a.Link,
+			Description: a.Summary,
+			PubDate:     a.PublishedAt.Format(time.RFC1123Z),
+			Guid:        a.Link,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(xml.Header))
+	_ = xml.NewEncoder(w).Encode(feed)
 }

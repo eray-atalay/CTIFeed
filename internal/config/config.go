@@ -3,6 +3,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"ctifeed/internal/model"
@@ -10,22 +12,27 @@ import (
 
 // Config represents runtime configuration options.
 type Config struct {
-	Sources       []model.FeedSource
-	MySQLDSN      string
-	DBHost        string
-	DBPort        string
-	DBUser        string
-	DBPassword    string
-	DBName        string
-	Workers       int
-	Timeout       time.Duration
-	Interval      time.Duration
-	MaxAgeHours   time.Duration
-	DaemonMode    bool
-	TopArticles   int
-	MinScore      int
-	UserAgent     string
-	TelegramToken string
+	Sources          []model.FeedSource
+	MySQLDSN         string
+	DBHost           string
+	DBPort           string
+	DBUser           string
+	DBPassword       string
+	DBName           string
+	Workers          int
+	Timeout          time.Duration
+	Interval         time.Duration
+	MaxAgeHours      time.Duration
+	DaemonMode       bool
+	TopArticles      int
+	MinScore         int
+	UserAgent        string
+	AdminUsername    string
+	AdminPassword    string
+	AdminJWTSecret   string
+	TelegramToken    string
+	TwitterAuthToken string
+	TwitterCT0       string
 }
 
 // GetDSN returns the active MySQL connection string, building from host/port/user/pass if DSN is not directly specified.
@@ -84,27 +91,43 @@ func DefaultSources() []model.FeedSource {
 		{Name: "Red Canary Blog", URL: "https://redcanary.com/blog/feed/", Category: "Threat Research & Detection"},
 		{Name: "Telegram: cveNotify", URL: "telegram://cveNotify", Category: "Telegram CVE"},
 		{Name: "Telegram: breachdetect", URL: "telegram://breachdetect", Category: "Telegram Breach"},
+		{Name: "CISA Cybersecurity Advisories", URL: "https://www.cisa.gov/cybersecurity-advisories/all.xml", Category: "Government & Alerts"},
+		{Name: "International Cyber Digest", URL: "https://www.internationalcyberdigest.com/feed/", Category: "Cyber News"},
+		{Name: "X: DarkWebInformer", URL: "http://localhost:8080/api/rss/twitter/DarkWebInformer", Category: "Twitter Threat Intel"},
+		{Name: "X: IntCyberDigest", URL: "http://localhost:8080/api/rss/twitter/IntCyberDigest", Category: "Twitter Threat Intel"},
+		{Name: "X: CVEnew", URL: "http://localhost:8080/api/rss/twitter/CVEnew", Category: "Twitter CVE"},
+		{Name: "X: DailyDarkWeb", URL: "http://localhost:8080/api/rss/twitter/DailyDarkWeb", Category: "Twitter Threat Intel"},
 	}
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // NewDefaultConfig initializes the default configuration settings.
 func NewDefaultConfig() *Config {
 	return &Config{
-		Sources:       DefaultSources(),
-		MySQLDSN:      "",
-		DBHost:        "127.0.0.1",
-		DBPort:        "3306",
-		DBUser:        "ctifeed",
-		DBPassword:    "ctifeed_secret",
-		DBName:        "ctifeed",
-		Workers:       5,
-		Timeout:       10 * time.Second,
-		Interval:      15 * time.Minute,
-		MaxAgeHours:   7 * 24 * time.Hour,
-		DaemonMode:    false,
-		TopArticles:   10,
-		MinScore:      0,
-		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-		TelegramToken: "",
+		Sources:        DefaultSources(),
+		MySQLDSN:       "",
+		DBHost:         "127.0.0.1",
+		DBPort:         "3306",
+		DBUser:         "ctifeed",
+		DBPassword:     "ctifeed_secret",
+		DBName:         "ctifeed",
+		Workers:        5,
+		Timeout:        10 * time.Second,
+		Interval:       15 * time.Minute,
+		MaxAgeHours:    7 * 24 * time.Hour,
+		DaemonMode:     false,
+		TopArticles:    10,
+		MinScore:       0,
+		UserAgent:      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+		AdminUsername:  envOrDefault("CTIFEED_ADMIN_USERNAME", "admin"),
+		AdminPassword:  envOrDefault("CTIFEED_ADMIN_PASSWORD", "ChangeMeNow!"),
+		AdminJWTSecret: envOrDefault("CTIFEED_ADMIN_JWT_SECRET", ""),
+		TelegramToken:  "",
 	}
 }

@@ -439,8 +439,10 @@ button {
   margin-bottom: 24px;
 }
 
-.search-bar-wrap {
+.search-bar-wrap,
+.search-box {
   position: relative;
+  width: 100%;
   margin-bottom: 14px;
 }
 
@@ -451,9 +453,14 @@ button {
   transform: translateY(-50%);
   color: var(--text-muted);
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
 }
 
-#search-input {
+#search-input,
+.toolbar-section .search-input {
   width: 100%;
   background: #0e1422;
   border: 1px solid var(--bg-card-border);
@@ -463,14 +470,17 @@ button {
   font-size: 0.9rem;
   font-family: inherit;
   transition: border-color var(--transition-fast);
+  box-sizing: border-box;
 }
 
-#search-input:focus {
+#search-input:focus,
+.toolbar-section .search-input:focus {
   border-color: #3b82f6;
   outline: none;
 }
 
-.search-clear {
+.search-clear,
+.search-clear-btn {
   position: absolute;
   right: 14px;
   top: 50%;
@@ -480,9 +490,15 @@ button {
   color: var(--text-muted);
   font-size: 1.2rem;
   cursor: pointer;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
-.search-clear:hover {
+.search-clear:hover,
+.search-clear-btn:hover {
   color: var(--text-primary);
 }
 
@@ -1757,6 +1773,79 @@ button {
 .telegram-link:hover {
   background: rgba(14, 165, 233, 0.2);
   color: #7dd3fc;
+}
+
+/* Sidebar Manuel Tarama Butonu */
+.nav-scan-divider {
+  height: 1px;
+  background: var(--bg-card-border);
+  margin: 8px 0;
+  opacity: 0.6;
+}
+
+.nav-scan-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-blue);
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.nav-scan-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.22);
+  color: #bfdbfe;
+  border-color: #60a5fa;
+}
+
+.nav-scan-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.nav-scan-btn.scanning svg {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.nav-scan-status {
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.nav-scan-status--ok {
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.nav-scan-status--warn {
+  background: rgba(250, 204, 21, 0.1);
+  color: #facc15;
+  border: 1px solid rgba(250, 204, 21, 0.2);
+}
+
+.nav-scan-status--err {
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.2);
 }
 
 .app-main-content {

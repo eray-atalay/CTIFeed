@@ -131,19 +131,14 @@ func (d *DB) migrate(ctx context.Context) error {
 	// Normalize future timestamps if published_at is ahead of current time
 	_, _ = d.conn.ExecContext(ctx, "UPDATE articles SET published_at = created_at WHERE published_at > DATE_ADD(NOW(), INTERVAL 5 MINUTE);")
 
+	// Telegram kaynaklarından IoC toplanmaması gerektiğinden, mevcut Telegram IoC kayıtlarını temizle
+	_, _ = d.conn.ExecContext(ctx, "DELETE FROM iocs WHERE LOWER(source) LIKE '%telegram%';")
+
 	return nil
 }
 
 // SeedSources inserts default feeds into feed_sources if the table is currently empty.
 func (d *DB) SeedSources(ctx context.Context, defaults []model.FeedSource) error {
-	var count int
-	if err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM feed_sources").Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-
 	stmt, err := d.conn.PrepareContext(ctx, `
 		INSERT IGNORE INTO feed_sources (name, url, category, is_active, last_status, created_at)
 		VALUES (?, ?, ?, TRUE, 'pending', NOW());
@@ -260,6 +255,33 @@ func (d *DB) UpdateSourceHealth(ctx context.Context, url string, status string, 
 		SET last_fetched_at = ?, last_status = ?, response_time_ms = ?, article_count = ?, last_error = ?
 		WHERE url = ? OR url LIKE ?;
 	`, now, status, latencyMs, articleCount, lastError, url, url+"%")
+	return err
+}
+
+func (d *DB) AddSource(ctx context.Context, name, url, category string) (*model.FeedSource, error) {
+	now := time.Now().UTC()
+	res, err := d.conn.ExecContext(ctx, `
+		INSERT INTO feed_sources (name, url, category, is_active, last_status, created_at)
+		VALUES (?, ?, ?, 1, 'pending', ?)
+	`, name, url, category, now)
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return &model.FeedSource{
+		ID:       id,
+		Name:     name,
+		URL:      url,
+		Category: category,
+		IsActive: true,
+	}, nil
+}
+
+func (d *DB) DeleteSource(ctx context.Context, id int64) error {
+	_, err := d.conn.ExecContext(ctx, "DELETE FROM feed_sources WHERE id = ?", id)
 	return err
 }
 
@@ -388,7 +410,8 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 			}
 		}
 
-		if a.ID > 0 && len(a.IoCs) > 0 {
+		isTelegram := strings.HasPrefix(strings.ToLower(a.Source), "telegram") || strings.Contains(strings.ToLower(a.Source), "telegram")
+		if !isTelegram && a.ID > 0 && len(a.IoCs) > 0 {
 			for _, item := range a.IoCs {
 				val := strings.TrimSpace(item.Value)
 				if val == "" {
@@ -991,6 +1014,9 @@ func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, sourc
 	if len(iocs) == 0 {
 		return nil
 	}
+	if strings.HasPrefix(strings.ToLower(source), "telegram") || strings.Contains(strings.ToLower(source), "telegram") {
+		return nil
+	}
 
 	stmt, err := d.conn.PrepareContext(ctx, `
 		INSERT IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
@@ -1033,12 +1059,15 @@ func (d *DB) GetIoCs(ctx context.Context, filter model.IoCFilter) ([]model.IoC, 
 		args = append(args, filter.ArticleID)
 	}
 
+	// Telegram kaynaklarından gelen göstergeler IoC havuzuna dahil edilmez
+	whereClauses = append(whereClauses, "LOWER(COALESCE(i.source, a.source, '')) NOT LIKE '%telegram%'")
+
 	whereSQL := ""
 	if len(whereClauses) > 0 {
 		whereSQL = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs i %s;", whereSQL)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM iocs i LEFT JOIN articles a ON i.article_id = a.id %s;", whereSQL)
 	var totalCount int
 	if err := d.conn.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("count iocs failed: %w", err)
@@ -1159,6 +1188,9 @@ func (d *DB) BackfillIoCs(ctx context.Context, extractFn func(text string) []mod
 
 	totalExtracted := 0
 	for _, a := range articles {
+		if strings.HasPrefix(strings.ToLower(a.source), "telegram") || strings.Contains(strings.ToLower(a.source), "telegram") {
+			continue
+		}
 		combinedText := a.title + " " + a.summary
 		extracted := extractFn(combinedText)
 		if len(extracted) > 0 {

@@ -37,7 +37,7 @@ type TelegramBot struct {
 	stopCh      chan struct{}
 	mu          sync.RWMutex
 	sentAlerts  map[string]time.Time
-	userPeriods map[int64]string // Kullanıcının seçtiği aktif zaman aralığı (1d, 7d, 30d)
+	userPeriods map[int64]string
 }
 
 func NewTelegramBot(token string, store *storage.DB) (*TelegramBot, error) {
@@ -104,7 +104,7 @@ func (tb *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 	case strings.HasPrefix(text, "/kapsam") || strings.HasPrefix(text, "/durum"):
 		tb.sendFilterStatus(chatID)
 	default:
-		reply := tgbotapi.NewMessage(chatID, "Komut anlaşılamadı.\n\n/filtre - Radar filtrelerini yönet ve tehditleri dök\n/kapsam - Aktif radar kapsamını incele\n/son - En kritik son 5 tehdit")
+		reply := tgbotapi.NewMessage(chatID, "⚠️ Komut anlaşılamadı.\n\n/filtre - Radar filtrelerini yönet\n/kapsam - Aktif radar kapsamını incele\n/son - En kritik son 5 tehdit")
 		tb.bot.Send(reply)
 	}
 }
@@ -112,11 +112,11 @@ func (tb *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 func (tb *TelegramBot) sendWelcome(chatID int64) {
 	text := `🛡️ <b>CTIFeed Siber Tehdit Radarı Botuna Hoş Geldiniz!</b>
 
-İstihbarat akışını filtreleyebilir, belirli zaman aralıklarındaki bulguları getirebilir ve yeni tehditler için anlık bildirim alabilirsiniz.
+Gerçek zamanlı istihbarat akışını filtreleyebilir, kritik zafiyetleri sorgulayabilir ve yeni tehditler için anlık bildirim alabilirsiniz.
 
 <b>Komutlar:</b>
 🎯 /filtre - Zaman aralığı & kategorileri seç ve tehditleri getir
-📋 /kapsam - Sadece seçtiğin aktif filtreleri gör
+📋 /kapsam - Aktif izleme kapsamını görüntüle
 🚨 /son - En kritik son 5 tehdit kaydı`
 
 	msg := tgbotapi.NewMessage(chatID, text)
@@ -131,11 +131,11 @@ func (tb *TelegramBot) getSelectedPeriod(chatID int64) string {
 	if p, ok := tb.userPeriods[chatID]; ok {
 		return p
 	}
-	return "1d" // Varsayılan: Son 24 Saat
+	return "1d"
 }
 
 func (tb *TelegramBot) sendFilterKeyboard(chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "🎯 <b>Tehdit Radarı Filtreleme Paneli:</b>\n<i>Aşağıdan zaman aralığını ve izlemek istediğiniz kategorileri belirleyin. Ardından en alttaki butonla haberleri dökün:</i>")
+	msg := tgbotapi.NewMessage(chatID, "🎯 <b>Tehdit Radarı Filtreleme Paneli:</b>\n<i>İstediğiniz zaman aralığını ve izlemek istediğiniz kategorileri seçin:</i>")
 	msg.ParseMode = "HTML"
 	msg.ReplyMarkup = tb.buildKeyboard(chatID)
 	tb.bot.Send(msg)
@@ -156,7 +156,6 @@ func (tb *TelegramBot) buildKeyboard(chatID int64) tgbotapi.InlineKeyboardMarkup
 
 	currentPeriod := tb.getSelectedPeriod(chatID)
 
-	// Time range buttons
 	p1, p2, p3 := "Son 24 Saat", "Son 1 Hafta", "Son 1 Ay"
 	if currentPeriod == "1d" {
 		p1 = "🎯 24 Saat"
@@ -173,24 +172,22 @@ func (tb *TelegramBot) buildKeyboard(chatID int64) tgbotapi.InlineKeyboardMarkup
 	var rows [][]tgbotapi.InlineKeyboardButton
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(btnDay, btnWeek, btnMonth))
 
-	// Category buttons
 	for _, cat := range CategoryCatalog {
-		state := "[   ]"
+		state := "⚪"
 		catKeyClean := strings.ToLower(strings.TrimSpace(cat.Key))
 		if activeMap[catKeyClean] {
-			state = "[ 🎯 Aktif ]"
+			state = "🟢 [Aktif]"
 		}
 		btnText := fmt.Sprintf("%s %s", state, cat.Label)
 		btn := tgbotapi.NewInlineKeyboardButtonData(btnText, "toggle:"+catKeyClean)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 	}
 
-	// Bulk action buttons
 	btnSelectAll := tgbotapi.NewInlineKeyboardButtonData("✅ Tümünü Seç", "cmd:select_all")
-	btnClearAll := tgbotapi.NewInlineKeyboardButtonData("❌ Tümünü Temizle", "cmd:clear_all")
+	btnClearAll := tgbotapi.NewInlineKeyboardButtonData("❌ Temizle", "cmd:clear_all")
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(btnSelectAll, btnClearAll))
 
-	btnFetch := tgbotapi.NewInlineKeyboardButtonData("📥 Seçilenlerle Tehditleri Getir", "cmd:fetch_news")
+	btnFetch := tgbotapi.NewInlineKeyboardButtonData("📥 Seçilen Tehditleri Listele", "cmd:fetch_news")
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(btnFetch))
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
@@ -200,7 +197,6 @@ func (tb *TelegramBot) handleCallback(cb *tgbotapi.CallbackQuery) {
 	chatID := cb.Message.Chat.ID
 	data := cb.Data
 
-	// Zaman Aralığı Değiştirme
 	if strings.HasPrefix(data, "period:") {
 		period := strings.TrimPrefix(data, "period:")
 		tb.mu.Lock()
@@ -213,7 +209,6 @@ func (tb *TelegramBot) handleCallback(cb *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	// Kategori Aç / Kapa (Sadece butonu günceller)
 	if strings.HasPrefix(data, "toggle:") {
 		key := strings.ToLower(strings.TrimPrefix(data, "toggle:"))
 
@@ -232,7 +227,6 @@ func (tb *TelegramBot) handleCallback(cb *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	// Tümünü Seç
 	if data == "cmd:select_all" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		subs, _ := tb.storage.GetUserSubscriptions(ctx, chatID)
@@ -253,7 +247,6 @@ func (tb *TelegramBot) handleCallback(cb *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	// Tümünü Temizle
 	if data == "cmd:clear_all" || data == "cmd:clear_filter" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		subs, _ := tb.storage.GetUserSubscriptions(ctx, chatID)
@@ -263,27 +256,17 @@ func (tb *TelegramBot) handleCallback(cb *tgbotapi.CallbackQuery) {
 		cancel()
 
 		tb.bot.Send(tgbotapi.NewCallback(cb.ID, "Tüm seçimler temizlendi."))
-		if data == "cmd:clear_filter" {
-			emptyMsg := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "🗑️ <b>İzleme kapsamı tamamen temizlendi.</b>\nYeni kategoriler eklemek için butona dokunabilirsiniz.")
-			emptyMsg.ParseMode = "HTML"
-			btn := tgbotapi.NewInlineKeyboardButtonData("🎯 Kapsam Belirle", "cmd:open_filter")
-			emptyMsg.ReplyMarkup = &tgbotapi.InlineKeyboardMarkup{InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{{btn}}}
-			tb.bot.Send(emptyMsg)
-		} else {
-			editMarkup := tgbotapi.NewEditMessageReplyMarkup(chatID, cb.Message.MessageID, tb.buildKeyboard(chatID))
-			tb.bot.Send(editMarkup)
-		}
+		editMarkup := tgbotapi.NewEditMessageReplyMarkup(chatID, cb.Message.MessageID, tb.buildKeyboard(chatID))
+		tb.bot.Send(editMarkup)
 		return
 	}
 
-	// Filtre Menüsünü Aç
 	if data == "cmd:open_filter" {
 		tb.bot.Send(tgbotapi.NewCallback(cb.ID, ""))
 		tb.sendFilterKeyboard(chatID)
 		return
 	}
 
-	// Seçilenlerle Tehditleri Getir
 	if data == "cmd:fetch_news" {
 		tb.bot.Send(tgbotapi.NewCallback(cb.ID, "İstihbarat taranıyor..."))
 		tb.fetchFilteredArticles(chatID)
@@ -291,7 +274,6 @@ func (tb *TelegramBot) handleCallback(cb *tgbotapi.CallbackQuery) {
 	}
 }
 
-// fetchFilteredArticles: Seçilen zaman aralığı ve seçili kategorilere göre haberleri tek seferde döker
 func (tb *TelegramBot) fetchFilteredArticles(chatID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -316,13 +298,12 @@ func (tb *TelegramBot) fetchFilteredArticles(chatID int64) {
 	}
 
 	if len(subs) == 0 {
-		infoMsg := tgbotapi.NewMessage(chatID, "⚠️ <i>Henüz hiçbir kategori seçmediniz. Lütfen listeden en az bir kategori seçip tekrar deneyin.</i>")
+		infoMsg := tgbotapi.NewMessage(chatID, "⚠️ <i>Henüz hiçbir kategori seçmediniz. Lütfen listeden en az bir kategori seçin.</i>")
 		infoMsg.ParseMode = "HTML"
 		tb.bot.Send(infoMsg)
 		return
 	}
 
-	// Seçili her kategori için haberleri topla
 	seen := make(map[string]bool)
 	var finalArticles []*model.Article
 
@@ -345,11 +326,10 @@ func (tb *TelegramBot) fetchFilteredArticles(chatID int64) {
 		return
 	}
 
-	headerMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf("📡 <b>Seçili Kapsam Sonuçları (%s | %d Tehdit):</b>\n──────────────────────────", periodLabel, len(finalArticles)))
+	headerMsg := tgbotapi.NewMessage(chatID, fmt.Sprintf("📡 <b>İstihbarat Raporu (%s | %d Bulgular):</b>\n──────────────────────────", periodLabel, len(finalArticles)))
 	headerMsg.ParseMode = "HTML"
 	tb.bot.Send(headerMsg)
 
-	// Limit message batch to prevent flooding
 	maxShow := 5
 	if len(finalArticles) < maxShow {
 		maxShow = len(finalArticles)
@@ -361,6 +341,7 @@ func (tb *TelegramBot) fetchFilteredArticles(chatID int64) {
 		msg.ParseMode = "HTML"
 		msg.DisableWebPagePreview = true
 		tb.bot.Send(msg)
+		time.Sleep(100 * time.Millisecond) // Rate Limit koruması
 	}
 }
 
@@ -385,10 +366,10 @@ func (tb *TelegramBot) sendLatestCritical(chatID int64) {
 		msg.ParseMode = "HTML"
 		msg.DisableWebPagePreview = true
 		tb.bot.Send(msg)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-// sendFilterStatus: /kapsam komutu - SADECE seçilen filtreleri listeler
 func (tb *TelegramBot) sendFilterStatus(chatID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -418,13 +399,13 @@ func (tb *TelegramBot) sendFilterStatus(chatID int64) {
 		}
 	}
 
-	text := fmt.Sprintf("📋 <b>Aktif Radar İzleme Kapsamınız (%d Kategori):</b>\n\n%s\n\n<i>Bu kategorilere yeni bir tehdit eklendiğinde radar otomatik olarak bildirim gönderecektir.</i>", len(subs), strings.Join(items, "\n"))
+	text := fmt.Sprintf("📋 <b>Aktif Radar İzleme Kapsamınız (%d Kategori):</b>\n\n%s\n\n<i>Seçili kategorilere yeni bir tehdit eklendiğinde anlık bildirim alırsınız.</i>", len(subs), strings.Join(items, "\n"))
 
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "HTML"
 
 	btnEdit := tgbotapi.NewInlineKeyboardButtonData("⚙️ Filtreleri Düzenle", "cmd:open_filter")
-	btnClear := tgbotapi.NewInlineKeyboardButtonData("🗑️ Kapsamı Sıfırla", "cmd:clear_filter")
+	btnClear := tgbotapi.NewInlineKeyboardButtonData("🗑️ Sıfırla", "cmd:clear_filter")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(btnEdit, btnClear),
 	)
@@ -451,11 +432,12 @@ func formatArticleCard(a *model.Article) string {
 	}
 
 	summary := a.Summary
-	if len(summary) > 220 {
-		summary = summary[:217] + "..."
+	if len(summary) > 200 {
+		summary = summary[:197] + "..."
 	}
 
-	return fmt.Sprintf("⚡ <b>%s</b>\n🎯 <b>Öncelik Skoru:</b> <code>%d/100</code> | 📰 <b>Kaynak:</b> <code>%s</code>%s%s\n\n📝 %s\n\n🔗 <a href=\"%s\">Detaylı Rapor</a>",
+	// Buton eklenmiş şık kart tasarımı
+	return fmt.Sprintf("⚡ <b>%s</b>\n🎯 <b>Skor:</b> <code>%d/100</code> | 📰 <b>Kaynak:</b> <code>%s</code>%s%s\n\n📝 <i>%s</i>\n\n🔗 <a href=\"%s\">Raporu İncele</a>",
 		html.EscapeString(a.Title),
 		a.Score,
 		html.EscapeString(a.Source),
@@ -484,7 +466,7 @@ func (tb *TelegramBot) DispatchAlert(ctx context.Context, articles []*model.Arti
 
 	for _, a := range articles {
 		card := formatArticleCard(a)
-		alertText := fmt.Sprintf("🔔 <b>YENİ TEHDİT BULGUSU!</b>\n%s", card)
+		alertText := fmt.Sprintf("🚨 <b>KRİTİK TEHDİT TESPİT EDİLDİ!</b>\n%s", card)
 
 		for chatID, userTags := range subscribers {
 			alertKey := fmt.Sprintf("%d:%s", chatID, a.Link)
@@ -498,6 +480,7 @@ func (tb *TelegramBot) DispatchAlert(ctx context.Context, articles []*model.Arti
 				msg.DisableWebPagePreview = true
 				if _, err := tb.bot.Send(msg); err == nil {
 					tb.sentAlerts[alertKey] = now
+					time.Sleep(50 * time.Millisecond)
 				}
 			}
 		}

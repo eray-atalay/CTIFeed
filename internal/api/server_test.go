@@ -67,6 +67,8 @@ func TestStaticAssetsEndpoints(t *testing.T) {
 	}{
 		{"/", http.StatusOK, "CTIFeed"},
 		{"/global.css", http.StatusOK, "--bg-base"},
+		{"/6RQ8GgqAnx6zNhvO9OMd.html", http.StatusOK, "Admin Paneli"},
+		{"/admin", http.StatusNotFound, ""},
 	}
 
 	for _, tt := range tests {

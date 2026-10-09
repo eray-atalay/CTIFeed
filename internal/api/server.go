@@ -82,12 +82,8 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 		slog.Error("Failed to create static sub-FS", slog.String("error", err.Error()))
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
-	mux.HandleFunc("GET /admin", func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = "/admin.html"
-		fileServer.ServeHTTP(w, r)
-	})
-	mux.HandleFunc("GET /admin/", func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = "/admin.html"
+	mux.HandleFunc("GET /6RQ8GgqAnx6zNhvO9OMd.html", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/6RQ8GgqAnx6zNhvO9OMd.html"
 		fileServer.ServeHTTP(w, r)
 	})
 

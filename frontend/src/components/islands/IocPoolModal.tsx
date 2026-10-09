@@ -176,7 +176,22 @@ export default function IocPoolModal() {
                       <span className="ioc-val" style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#38bdf8', wordBreak: 'break-all' }}>{ioc.value}</span>
                     </td>
                     <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
-                      {ioc.source ? <span className="ioc-source-tag" style={{ fontSize: '0.78rem', padding: '4px 8px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px' }}>{ioc.source}</span> : '-'}
+                      {ioc.source ? (
+                        ioc.url ? (
+                          <a
+                            className="ioc-source-tag"
+                            href={ioc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Kaynak makaleyi aç"
+                            style={{ fontSize: '0.78rem', padding: '4px 8px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', color: '#38bdf8', textDecoration: 'none' }}
+                          >
+                            {ioc.source} ↗
+                          </a>
+                        ) : (
+                          <span className="ioc-source-tag" style={{ fontSize: '0.78rem', padding: '4px 8px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px' }}>{ioc.source}</span>
+                        )
+                      ) : '-'}
                     </td>
                     <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
                       <div className="ioc-context" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>

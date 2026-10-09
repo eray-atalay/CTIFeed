@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -826,6 +827,288 @@ var (
 	xSSRB64Regex  = regexp.MustCompile(`id:"(VHdlZXQ6[A-Za-z0-9+/=]+)"`)
 )
 
+const twitterBearerToken = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+
+type twitterGraphQLResponse struct {
+	Data struct {
+		User struct {
+			Result struct {
+				Timeline struct {
+					Timeline struct {
+						Instructions []twitterTimelineInstruction `json:"instructions"`
+					} `json:"timeline"`
+				} `json:"timeline"`
+			} `json:"result"`
+		} `json:"user"`
+	} `json:"data"`
+}
+
+type twitterTimelineInstruction struct {
+	Entries []twitterTimelineEntry `json:"entries"`
+	Entry   twitterTimelineEntry   `json:"entry"`
+}
+
+type twitterTimelineEntry struct {
+	Content struct {
+		EntryType   string `json:"entryType"`
+		ItemContent struct {
+			TweetResults struct {
+				Result struct {
+					RestID string `json:"rest_id"`
+					Legacy struct {
+						IDStr     string `json:"id_str"`
+						FullText  string `json:"full_text"`
+						CreatedAt string `json:"created_at"`
+					} `json:"legacy"`
+				} `json:"result"`
+			} `json:"tweet_results"`
+			Value      string `json:"value"`
+			CursorType string `json:"cursorType"`
+		} `json:"itemContent"`
+	} `json:"content"`
+}
+
+type twitterGuestTokenResponse struct {
+	GuestToken string `json:"guest_token"`
+}
+
+func (c *Collector) fetchTwitterGraphQL(ctx context.Context, username string, cutoff time.Time, sourceName string) ([]*model.Article, int, error) {
+	const queryID = "PNd0vlufvrcIwrAnBYKE9g"
+	const maxPages = 25
+	var cursor string
+	var articles []*model.Article
+
+	headers := map[string]string{
+		"Authorization": "Bearer " + twitterBearerToken,
+		"User-Agent":    c.cfg.UserAgent,
+	}
+	authenticated := c.cfg.TwitterAuthToken != "" && c.cfg.TwitterCT0 != ""
+	if authenticated {
+		headers["Cookie"] = fmt.Sprintf("auth_token=%s; ct0=%s", c.cfg.TwitterAuthToken, c.cfg.TwitterCT0)
+		headers["x-csrf-token"] = c.cfg.TwitterCT0
+		headers["x-twitter-auth-type"] = "OAuth2Session"
+		headers["x-twitter-active-user"] = "yes"
+		headers["Origin"] = "https://x.com"
+		headers["Referer"] = "https://x.com/"
+	} else {
+		if err := c.activateTwitterGuest(ctx, headers); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	userID := ""
+	for page := 0; page < maxPages; page++ {
+		vars := map[string]interface{}{
+			"userId":                                 userID,
+			"count":                                  40,
+			"includePromotedContent":                 false,
+			"withQuickPromoteEligibilityTweetFields": false,
+			"withVoice":                              true,
+			"withV2Timeline":                         true,
+		}
+		if cursor != "" {
+			vars["cursor"] = cursor
+		}
+
+		if userID == "" {
+			user, err := c.fetchTwitterUserID(ctx, username, headers)
+			if err != nil {
+				if !authenticated {
+					return nil, 0, err
+				}
+				delete(headers, "Cookie")
+				delete(headers, "x-csrf-token")
+				if guestErr := c.activateTwitterGuest(ctx, headers); guestErr != nil {
+					return nil, 0, fmt.Errorf("authenticated Twitter request failed: %v; guest fallback failed: %w", err, guestErr)
+				}
+				authenticated = false
+				user, err = c.fetchTwitterUserID(ctx, username, headers)
+				if err != nil {
+					return nil, 0, err
+				}
+			}
+			userID = user
+			vars["userId"] = userID
+		}
+
+		features := map[string]bool{
+			"rweb_tipjar_consumption_enabled":                                   true,
+			"responsive_web_graphql_timeline_navigation_enabled":                true,
+			"responsive_web_graphql_skip_user_profile_image_extensions_enabled": false,
+			"creator_subscriptions_tweet_preview_api_enabled":                   true,
+			"verified_phone_label_enabled":                                      false,
+		}
+		query := url.Values{}
+		varJSON, _ := json.Marshal(vars)
+		featureJSON, _ := json.Marshal(features)
+		query.Set("variables", string(varJSON))
+		query.Set("features", string(featureJSON))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://x.com/i/api/graphql/"+queryID+"/UserTweets?"+query.Encode(), nil)
+		if err != nil {
+			return nil, 0, err
+		}
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+		var payload twitterGraphQLResponse
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 8*1024*1024)).Decode(&payload)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, 0, fmt.Errorf("twitter graphql status: %s", resp.Status)
+		}
+		if decodeErr != nil {
+			return nil, 0, fmt.Errorf("decode twitter graphql response: %w", decodeErr)
+		}
+
+		pageItems := 0
+		pageRecentItems := 0
+		pageOldItems := 0
+		for _, instruction := range payload.Data.User.Result.Timeline.Timeline.Instructions {
+			entries := instruction.Entries
+			if instruction.Entry.Content.EntryType != "" ||
+				instruction.Entry.Content.ItemContent.TweetResults.Result.RestID != "" ||
+				instruction.Entry.Content.ItemContent.CursorType != "" {
+				entries = append(entries, instruction.Entry)
+			}
+			for _, entry := range entries {
+				content := entry.Content
+				if content.EntryType == "TimelineTimelineCursor" {
+					if content.ItemContent.CursorType == "Bottom" {
+						vars["cursor"] = content.ItemContent.Value
+					}
+					continue
+				}
+				tweet := content.ItemContent.TweetResults.Result
+				if tweet.RestID == "" || tweet.Legacy.FullText == "" {
+					continue
+				}
+				pubDate, err := time.Parse(time.RubyDate, tweet.Legacy.CreatedAt)
+				if err != nil {
+					continue
+				}
+				pageItems++
+				if pubDate.Before(cutoff) {
+					pageOldItems++
+					continue
+				}
+				pageRecentItems++
+				cleanSummary := strings.TrimSpace(html.UnescapeString(tweet.Legacy.FullText))
+				if cleanSummary == "" || strings.HasPrefix(cleanSummary, "RT @") {
+					continue
+				}
+				cleanTitle := cleanSummary
+				if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
+					cleanTitle = strings.TrimSpace(cleanTitle[:idx])
+				}
+				if len(cleanTitle) > 120 {
+					cleanTitle = cleanTitle[:117] + "..."
+				}
+				scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
+				article := &model.Article{
+					Source:      sourceName,
+					Title:       cleanTitle,
+					Link:        fmt.Sprintf("https://x.com/%s/status/%s", username, tweet.RestID),
+					Summary:     cleanSummary,
+					Score:       scoringResult.Score,
+					Tags:        scoringResult.Tags,
+					PublishedAt: pubDate.UTC(),
+					CreatedAt:   time.Now().UTC(),
+					IoCs:        ioc.Extract(cleanSummary),
+				}
+				// The same pinned tweet can appear on every timeline page.
+				found := false
+				for _, existing := range articles {
+					if existing.Link == article.Link {
+						found = true
+						break
+					}
+				}
+				if !found {
+					articles = append(articles, article)
+				}
+			}
+		}
+		if pageItems == 0 || (pageOldItems > 0 && pageRecentItems == 0) {
+			break
+		}
+		nextCursor, ok := vars["cursor"].(string)
+		if !ok || nextCursor == "" || nextCursor == cursor {
+			break
+		}
+		cursor = nextCursor
+	}
+	return articles, 0, nil
+}
+
+func (c *Collector) activateTwitterGuest(ctx context.Context, headers map[string]string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.x.com/1.1/guest/activate.json", strings.NewReader(""))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+twitterBearerToken)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("twitter guest activation status: %s", resp.Status)
+	}
+	var token twitterGuestTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		return fmt.Errorf("decode twitter guest token: %w", err)
+	}
+	if token.GuestToken == "" {
+		return fmt.Errorf("twitter guest token was empty")
+	}
+	headers["x-guest-token"] = token.GuestToken
+	return nil
+}
+
+func (c *Collector) fetchTwitterUserID(ctx context.Context, username string, headers map[string]string) (string, error) {
+	query := url.Values{}
+	vars, _ := json.Marshal(map[string]string{"screen_name": username, "withSafetyModeUserFields": "true"})
+	features, _ := json.Marshal(map[string]bool{"hidden_profile_subscriptions_enabled": true})
+	query.Set("variables", string(vars))
+	query.Set("features", string(features))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://x.com/i/api/graphql/1VOOyvKkiI3FMmkeDNxM9A/UserByScreenName?"+query.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("twitter user lookup status: %s", resp.Status)
+	}
+	var payload struct {
+		Data struct {
+			User struct {
+				Result struct {
+					RestID string `json:"rest_id"`
+				} `json:"result"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode twitter user lookup: %w", err)
+	}
+	if payload.Data.User.Result.RestID == "" {
+		return "", fmt.Errorf("twitter user ID not found for %s", username)
+	}
+	return payload.Data.User.Result.RestID, nil
+}
+
 func (c *Collector) FetchTwitterArticles(ctx context.Context, username string) ([]*model.Article, error) {
 	src := model.FeedSource{
 		Name: "X: " + username,
@@ -853,6 +1136,15 @@ func (c *Collector) fetchTwitterFeed(parentCtx context.Context, src model.FeedSo
 		twitterCutoff = time.Now().Add(-c.cfg.MaxAgeHours)
 	}
 
+	if articles, oldCnt, err := c.fetchTwitterGraphQL(ctx, username, twitterCutoff, src.Name); err == nil {
+		if len(articles) > 0 {
+			return articles, oldCnt, nil
+		}
+		slog.Warn("Twitter GraphQL returned no recent articles", slog.String("username", username))
+	} else {
+		slog.Warn("Twitter GraphQL fetch failed", slog.String("username", username), slog.String("error", err.Error()))
+	}
+
 	if c.cfg.TwitterAuthToken != "" && c.cfg.TwitterCT0 != "" {
 		directURL := fmt.Sprintf("https://x.com/%s", username)
 		req, err := http.NewRequestWithContext(ctx, "GET", directURL, nil)
@@ -874,10 +1166,6 @@ func (c *Collector) fetchTwitterFeed(parentCtx context.Context, src model.FeedSo
 						seenIDs := make(map[string]bool)
 
 						for _, loc := range matches {
-							if len(articles) >= 30 {
-								break
-							}
-
 							tsStr := bodyStr[loc[2]:loc[3]]
 							rawText := bodyStr[loc[4]:loc[5]]
 							ts, err := strconv.ParseInt(tsStr, 10, 64)
@@ -1002,10 +1290,6 @@ func (c *Collector) fetchTwitterFeed(parentCtx context.Context, src model.FeedSo
 	oldCnt := 0
 
 	for _, entry := range data.Props.PageProps.Timeline.Entries {
-		if len(articles) >= 30 {
-			break
-		}
-
 		tw := entry.Content.Tweet
 		if tw.IDStr == "" || tw.Text == "" {
 			continue

@@ -56,7 +56,6 @@ var turkeyKeywords = []string{
 	"gib",
 	"mhrs",
 	"osym",
-	"kamusm",
 	"afad",
 	"kizilay",
 	"tubitak",
@@ -73,9 +72,6 @@ var turkeyKeywords = []string{
 	"turkcell",
 	"turktelekom",
 	"superonline",
-	"papara",
-	"ininal",
-	"bkm",
 	"ziraat",
 	"vakifbank",
 	"halkbank",
@@ -83,6 +79,10 @@ var turkeyKeywords = []string{
 	"yapikredi",
 	"ankara",
 	"istanbul",
+	"🇹🇷",
+	"okul",
+	"üniversite",
+	"üniversitesi",
 }
 
 // Active exploitation and PoC indicators (+25 points)

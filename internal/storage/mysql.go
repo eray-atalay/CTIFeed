@@ -4,27 +4,144 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"ctifeed/internal/model"
 )
 
 // DB handles MySQL storage operations.
 type DB struct {
-	conn *sql.DB
+	conn   *sql.DB
+	gormDB *gorm.DB
+}
+
+type feedSourceRecord struct {
+	ID             int64      `gorm:"column:id;primaryKey"`
+	Name           string     `gorm:"column:name"`
+	URL            string     `gorm:"column:url"`
+	Category       string     `gorm:"column:category"`
+	IsActive       bool       `gorm:"column:is_active"`
+	LastFetchedAt  *time.Time `gorm:"column:last_fetched_at"`
+	LastStatus     string     `gorm:"column:last_status"`
+	ResponseTimeMs int64      `gorm:"column:response_time_ms"`
+	ArticleCount   int        `gorm:"column:article_count"`
+	LastError      string     `gorm:"column:last_error"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
+}
+
+func (feedSourceRecord) TableName() string {
+	return "feed_sources"
+}
+
+func (r feedSourceRecord) model() model.FeedSource {
+	return model.FeedSource{
+		ID:             r.ID,
+		Name:           r.Name,
+		URL:            r.URL,
+		Category:       r.Category,
+		IsActive:       r.IsActive,
+		LastFetchedAt:  r.LastFetchedAt,
+		LastStatus:     r.LastStatus,
+		ResponseTimeMs: r.ResponseTimeMs,
+		ArticleCount:   r.ArticleCount,
+		LastError:      r.LastError,
+	}
+}
+
+type articleRecord struct {
+	ID          int64     `gorm:"column:id;primaryKey"`
+	Source      string    `gorm:"column:source"`
+	Title       string    `gorm:"column:title"`
+	Link        string    `gorm:"column:link"`
+	Summary     string    `gorm:"column:summary"`
+	Score       int       `gorm:"column:score"`
+	Tags        string    `gorm:"column:tags"`
+	PublishedAt time.Time `gorm:"column:published_at"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+}
+
+func (articleRecord) TableName() string {
+	return "articles"
+}
+
+func newArticleRecord(article *model.Article) (articleRecord, error) {
+	tagsJSON, err := json.Marshal(article.Tags)
+	if err != nil {
+		return articleRecord{}, fmt.Errorf("failed to marshal tags: %w", err)
+	}
+	return articleRecord{
+		ID:          article.ID,
+		Source:      article.Source,
+		Title:       article.Title,
+		Link:        article.Link,
+		Summary:     article.Summary,
+		Score:       article.Score,
+		Tags:        string(tagsJSON),
+		PublishedAt: article.PublishedAt.UTC(),
+		CreatedAt:   article.CreatedAt.UTC(),
+	}, nil
+}
+
+func (r articleRecord) model() *model.Article {
+	article := &model.Article{
+		ID:          r.ID,
+		Source:      r.Source,
+		Title:       r.Title,
+		Link:        r.Link,
+		Summary:     r.Summary,
+		Score:       r.Score,
+		PublishedAt: r.PublishedAt,
+		CreatedAt:   r.CreatedAt,
+	}
+	if err := json.Unmarshal([]byte(r.Tags), &article.Tags); err != nil {
+		article.Tags = []string{}
+	}
+	return article
+}
+
+type iocRecord struct {
+	ID            int64     `gorm:"column:id;primaryKey"`
+	ArticleID     int64     `gorm:"column:article_id"`
+	Type          string    `gorm:"column:type"`
+	Value         string    `gorm:"column:value"`
+	ThreatContext string    `gorm:"column:threat_context"`
+	Source        string    `gorm:"column:source"`
+	FirstSeen     time.Time `gorm:"column:first_seen"`
+}
+
+func (iocRecord) TableName() string {
+	return "iocs"
+}
+
+type subscriptionRecord struct {
+	ChatID    int64     `gorm:"column:chat_id;primaryKey"`
+	Tag       string    `gorm:"column:tag;primaryKey"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (subscriptionRecord) TableName() string {
+	return "user_subscriptions"
 }
 
 // NewDB opens or initializes the MySQL database at the given DSN.
 func NewDB(dsn string) (*DB, error) {
-	conn, err := sql.Open("mysql", dsn)
+	gormDB, err := gorm.Open(gormmysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open mysql connection: %w", err)
 	}
 
+	conn, err := gormDB.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to access mysql connection: %w", err)
+	}
 	conn.SetMaxOpenConns(25)
 	conn.SetMaxIdleConns(10)
 	conn.SetConnMaxLifetime(5 * time.Minute)
@@ -38,7 +155,7 @@ func NewDB(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping mysql database: %w", err)
 	}
 
-	db := &DB{conn: conn}
+	db := &DB{conn: conn, gormDB: gormDB}
 	if err := db.migrate(ctx); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("failed to run database migrations: %w", err)
@@ -156,142 +273,83 @@ func (d *DB) SeedSources(ctx context.Context, defaults []model.FeedSource) error
 
 // GetSources returns all configured feed sources along with health metrics.
 func (d *DB) GetSources(ctx context.Context) ([]model.FeedSource, error) {
-	rows, err := d.conn.QueryContext(ctx, `
-		SELECT id, name, url, category, is_active, last_fetched_at, last_status, response_time_ms, article_count, COALESCE(last_error, '')
-		FROM feed_sources
-		ORDER BY id ASC;
-	`)
-	if err != nil {
+	var records []feedSourceRecord
+	if err := d.gormDB.WithContext(ctx).Order("id ASC").Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("failed to query feed sources: %w", err)
 	}
-	defer rows.Close()
 
-	var sources []model.FeedSource
-	for rows.Next() {
-		var s model.FeedSource
-		var fetchedVal any
-		if err := rows.Scan(
-			&s.ID,
-			&s.Name,
-			&s.URL,
-			&s.Category,
-			&s.IsActive,
-			&fetchedVal,
-			&s.LastStatus,
-			&s.ResponseTimeMs,
-			&s.ArticleCount,
-			&s.LastError,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan feed source: %w", err)
-		}
-		if t := parseDBTime(fetchedVal); !t.IsZero() {
-			s.LastFetchedAt = &t
-		}
-		sources = append(sources, s)
+	sources := make([]model.FeedSource, 0, len(records))
+	for _, record := range records {
+		sources = append(sources, record.model())
 	}
 	return sources, nil
 }
 
 // GetActiveSources returns only active feed sources for scanning.
 func (d *DB) GetActiveSources(ctx context.Context) ([]model.FeedSource, error) {
-	rows, err := d.conn.QueryContext(ctx, `
-		SELECT id, name, url, category, is_active, last_fetched_at, last_status, response_time_ms, article_count, COALESCE(last_error, '')
-		FROM feed_sources
-		WHERE is_active = TRUE
-		ORDER BY id ASC;
-	`)
-	if err != nil {
+	var records []feedSourceRecord
+	if err := d.gormDB.WithContext(ctx).Where("is_active = ?", true).Order("id ASC").Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("failed to query active feed sources: %w", err)
 	}
-	defer rows.Close()
 
-	var sources []model.FeedSource
-	for rows.Next() {
-		var s model.FeedSource
-		var fetchedVal any
-		if err := rows.Scan(
-			&s.ID,
-			&s.Name,
-			&s.URL,
-			&s.Category,
-			&s.IsActive,
-			&fetchedVal,
-			&s.LastStatus,
-			&s.ResponseTimeMs,
-			&s.ArticleCount,
-			&s.LastError,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan active feed source: %w", err)
-		}
-		if t := parseDBTime(fetchedVal); !t.IsZero() {
-			s.LastFetchedAt = &t
-		}
-		sources = append(sources, s)
+	sources := make([]model.FeedSource, 0, len(records))
+	for _, record := range records {
+		sources = append(sources, record.model())
 	}
 	return sources, nil
 }
 
 // ToggleSource switches a feed source between active and inactive.
 func (d *DB) ToggleSource(ctx context.Context, id int64) (bool, error) {
-	var currentActive bool
-	err := d.conn.QueryRowContext(ctx, "SELECT is_active FROM feed_sources WHERE id = ?", id).Scan(&currentActive)
-	if err != nil {
+	var source feedSourceRecord
+	if err := d.gormDB.WithContext(ctx).First(&source, id).Error; err != nil {
 		return false, fmt.Errorf("source not found: %w", err)
 	}
 
-	newActive := !currentActive
-	_, err = d.conn.ExecContext(ctx, "UPDATE feed_sources SET is_active = ? WHERE id = ?", newActive, id)
-	if err != nil {
+	source.IsActive = !source.IsActive
+	if err := d.gormDB.WithContext(ctx).Model(&feedSourceRecord{}).
+		Where("id = ?", id).Update("is_active", source.IsActive).Error; err != nil {
 		return false, fmt.Errorf("failed to toggle source: %w", err)
 	}
-	return newActive, nil
+	return source.IsActive, nil
 }
 
 // UpdateSourceHealth updates health status, latency, and statistics for a feed source.
 func (d *DB) UpdateSourceHealth(ctx context.Context, url string, status string, latencyMs int64, articleCount int, lastError string) error {
 	now := time.Now().UTC()
-	_, err := d.conn.ExecContext(ctx, `
-		UPDATE feed_sources 
-		SET last_fetched_at = ?, last_status = ?, response_time_ms = ?, article_count = ?, last_error = ?
-		WHERE url = ? OR url LIKE ?;
-	`, now, status, latencyMs, articleCount, lastError, url, url+"%")
-	return err
+	return d.gormDB.WithContext(ctx).Model(&feedSourceRecord{}).
+		Where("url = ? OR url LIKE ?", url, url+"%").
+		Updates(map[string]any{
+			"last_fetched_at":  now,
+			"last_status":      status,
+			"response_time_ms": latencyMs,
+			"article_count":    articleCount,
+			"last_error":       lastError,
+		}).Error
 }
 
 func (d *DB) AddSource(ctx context.Context, name, url, category string) (*model.FeedSource, error) {
-	now := time.Now().UTC()
-	res, err := d.conn.ExecContext(ctx, `
-		INSERT INTO feed_sources (name, url, category, is_active, last_status, created_at)
-		VALUES (?, ?, ?, 1, 'pending', ?)
-	`, name, url, category, now)
-	if err != nil {
+	source := &feedSourceRecord{
+		Name:       name,
+		URL:        url,
+		Category:   category,
+		IsActive:   true,
+		LastStatus: "pending",
+		CreatedAt:  time.Now().UTC(),
+	}
+	if err := d.gormDB.WithContext(ctx).Create(source).Error; err != nil {
 		return nil, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	return &model.FeedSource{
-		ID:       id,
-		Name:     name,
-		URL:      url,
-		Category: category,
-		IsActive: true,
-	}, nil
+	result := source.model()
+	return &result, nil
 }
 
 func (d *DB) DeleteSource(ctx context.Context, id int64) error {
-	_, err := d.conn.ExecContext(ctx, "DELETE FROM feed_sources WHERE id = ?", id)
-	return err
+	return d.gormDB.WithContext(ctx).Delete(&feedSourceRecord{}, id).Error
 }
 
 // SaveArticle inserts an article if it does not already exist.
 func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, error) {
-	tagsJSON, err := json.Marshal(article.Tags)
-	if err != nil {
-		return false, fmt.Errorf("failed to marshal tags: %w", err)
-	}
-
 	if article.CreatedAt.IsZero() {
 		article.CreatedAt = time.Now().UTC()
 	}
@@ -301,36 +359,17 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 		article.PublishedAt = article.CreatedAt
 	}
 
-	query := `
-		INSERT IGNORE INTO articles (source, title, link, summary, score, tags, published_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-	`
-
-	res, err := d.conn.ExecContext(
-		ctx,
-		query,
-		article.Source,
-		article.Title,
-		article.Link,
-		article.Summary,
-		article.Score,
-		string(tagsJSON),
-		article.PublishedAt.UTC(),
-		article.CreatedAt.UTC(),
-	)
+	record, err := newArticleRecord(article)
 	if err != nil {
-		return false, fmt.Errorf("failed to execute insert article: %w", err)
+		return false, err
+	}
+	result := d.gormDB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	if result.Error != nil {
+		return false, fmt.Errorf("failed to execute insert article: %w", result.Error)
 	}
 
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("failed to read rows affected: %w", err)
-	}
-
-	if rowsAffected > 0 {
-		if id, err := res.LastInsertId(); err == nil {
-			article.ID = id
-		}
+	if result.RowsAffected > 0 {
+		article.ID = record.ID
 		if len(article.IoCs) > 0 {
 			_ = d.SaveIoCs(ctx, article.ID, article.Title, article.Source, article.IoCs)
 		}
@@ -342,88 +381,62 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 
 // SaveArticles writes a slice of articles and their extracted IoCs in a single transaction.
 func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, int, error) {
-	tx, err := d.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT IGNORE INTO articles (source, title, link, summary, score, tags, published_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-	`)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer stmt.Close()
-
-	iocStmt, err := tx.PrepareContext(ctx, `
-		INSERT IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
-		VALUES (?, ?, ?, ?, ?, ?);
-	`)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to prepare ioc statement: %w", err)
-	}
-	defer iocStmt.Close()
-
 	now := time.Now().UTC()
 	inserted := 0
 	skipped := 0
 
-	for _, a := range articles {
-		tagsJSON, err := json.Marshal(a.Tags)
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to marshal tags: %w", err)
-		}
-
-		if a.CreatedAt.IsZero() {
-			a.CreatedAt = now
-		}
-
-		res, err := stmt.ExecContext(
-			ctx,
-			a.Source,
-			a.Title,
-			a.Link,
-			a.Summary,
-			a.Score,
-			string(tagsJSON),
-			a.PublishedAt.UTC(),
-			a.CreatedAt.UTC(),
-		)
-		if err != nil {
-			return inserted, skipped, fmt.Errorf("failed to insert article (%s): %w", a.Link, err)
-		}
-
-		rows, err := res.RowsAffected()
-		if err == nil && rows > 0 {
-			inserted++
-			if id, err := res.LastInsertId(); err == nil {
-				a.ID = id
+	err := d.gormDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, a := range articles {
+			if a.CreatedAt.IsZero() {
+				a.CreatedAt = now
 			}
-		} else {
-			skipped++
-			if a.ID <= 0 {
-				_ = tx.QueryRowContext(ctx, "SELECT id FROM articles WHERE link = ?", a.Link).Scan(&a.ID)
+			if a.PublishedAt.After(time.Now().Add(5 * time.Minute)) {
+				a.PublishedAt = a.CreatedAt
 			}
-		}
 
-		isTelegram := strings.HasPrefix(strings.ToLower(a.Source), "telegram") || strings.Contains(strings.ToLower(a.Source), "telegram")
-		if !isTelegram && a.ID > 0 && len(a.IoCs) > 0 {
-			for _, item := range a.IoCs {
-				val := strings.TrimSpace(item.Value)
-				if val == "" {
-					continue
+			record, err := newArticleRecord(a)
+			if err != nil {
+				return err
+			}
+			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+			if result.Error != nil {
+				return fmt.Errorf("failed to insert article (%s): %w", a.Link, result.Error)
+			}
+
+			if result.RowsAffected > 0 {
+				inserted++
+				a.ID = record.ID
+			} else {
+				skipped++
+				if a.ID <= 0 {
+					var existing articleRecord
+					if err := tx.Select("id").Where("link = ?", a.Link).First(&existing).Error; err == nil {
+						a.ID = existing.ID
+					}
 				}
-				_, _ = iocStmt.ExecContext(ctx, a.ID, item.Type, val, a.Title, a.Source, now)
+			}
+
+			isTelegram := strings.Contains(strings.ToLower(a.Source), "telegram")
+			if !isTelegram && a.ID > 0 {
+				for _, item := range a.IoCs {
+					val := strings.TrimSpace(item.Value)
+					if val == "" {
+						continue
+					}
+					ioc := iocRecord{
+						ArticleID: a.ID, Type: item.Type, Value: val,
+						ThreatContext: a.Title, Source: a.Source, FirstSeen: now,
+					}
+					if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&ioc).Error; err != nil {
+						return fmt.Errorf("failed to insert ioc for article (%s): %w", a.Link, err)
+					}
+				}
 			}
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, 0, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil
+	})
+	if err != nil {
+		return inserted, skipped, err
 	}
 
 	return inserted, skipped, nil
@@ -434,55 +447,17 @@ func (d *DB) GetTopArticles(ctx context.Context, limit int, minScore int) ([]*mo
 	if limit <= 0 {
 		limit = 10
 	}
-
-	query := `
-		SELECT id, source, title, link, summary, score, tags, published_at, created_at
-		FROM articles
-		WHERE score >= ? AND source NOT LIKE 'Telegram:%'
-		ORDER BY score DESC, published_at DESC
-		LIMIT ?;
-	`
-
-	rows, err := d.conn.QueryContext(ctx, query, minScore, limit)
-	if err != nil {
+	var records []articleRecord
+	if err := d.gormDB.WithContext(ctx).
+		Where("score >= ? AND source NOT LIKE ?", minScore, "Telegram:%").
+		Order("score DESC, published_at DESC").Limit(limit).Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("query top articles failed: %w", err)
 	}
-	defer rows.Close()
 
-	var articles []*model.Article
-	for rows.Next() {
-		var a model.Article
-		var tagsJSON string
-		var pubVal, createdVal any
-
-		if err := rows.Scan(
-			&a.ID,
-			&a.Source,
-			&a.Title,
-			&a.Link,
-			&a.Summary,
-			&a.Score,
-			&tagsJSON,
-			&pubVal,
-			&createdVal,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan article row: %w", err)
-		}
-
-		if err := json.Unmarshal([]byte(tagsJSON), &a.Tags); err != nil {
-			a.Tags = []string{}
-		}
-
-		a.PublishedAt = parseDBTime(pubVal)
-		a.CreatedAt = parseDBTime(createdVal)
-
-		articles = append(articles, &a)
+	articles := make([]*model.Article, 0, len(records))
+	for _, record := range records {
+		articles = append(articles, record.model())
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows iteration error: %w", err)
-	}
-
 	return articles, nil
 }
 
@@ -497,87 +472,30 @@ func (d *DB) GetArticlesByTagAndTime(ctx context.Context, tag string, since time
 		limit = 5
 	}
 
-	var query string
-	var args []any
-
 	cleanTag := strings.ToLower(strings.TrimSpace(tag))
-
+	query := d.gormDB.WithContext(ctx).Model(&articleRecord{}).
+		Where("published_at >= ?", since.UTC()).
+		Order("score DESC, published_at DESC").Limit(limit)
 	switch cleanTag {
 	case "critical":
-		query = `
-			SELECT id, source, title, link, summary, score, tags, published_at, created_at
-			FROM articles 
-			WHERE score >= 50 AND published_at >= ?
-			ORDER BY score DESC, published_at DESC 
-			LIMIT ?;
-		`
-		args = []any{since.UTC(), limit}
+		query = query.Where("score >= ?", 50)
 	case "tr-focus":
-		query = `
-			SELECT id, source, title, link, summary, score, tags, published_at, created_at
-			FROM articles 
-			WHERE (LOWER(tags) LIKE '%tr-focus%' OR LOWER(source) LIKE '%usom%') AND published_at >= ?
-			ORDER BY score DESC, published_at DESC 
-			LIMIT ?;
-		`
-		args = []any{since.UTC(), limit}
+		query = query.Where("(LOWER(tags) LIKE ? OR LOWER(source) LIKE ?)", "%tr-focus%", "%usom%")
 	case "cve":
-		query = `
-			SELECT id, source, title, link, summary, score, tags, published_at, created_at
-			FROM articles 
-			WHERE (LOWER(tags) LIKE '%cve-%' OR LOWER(title) LIKE '%cve-%') AND published_at >= ?
-			ORDER BY score DESC, published_at DESC 
-			LIMIT ?;
-		`
-		args = []any{since.UTC(), limit}
+		query = query.Where("(LOWER(tags) LIKE ? OR LOWER(title) LIKE ?)", "%cve-%", "%cve-%")
 	default:
-		query = `
-			SELECT id, source, title, link, summary, score, tags, published_at, created_at
-			FROM articles 
-			WHERE (LOWER(tags) LIKE ? OR LOWER(title) LIKE ?) AND published_at >= ?
-			ORDER BY score DESC, published_at DESC 
-			LIMIT ?;
-		`
 		pattern := "%" + cleanTag + "%"
-		args = []any{pattern, pattern, since.UTC(), limit}
+		query = query.Where("(LOWER(tags) LIKE ? OR LOWER(title) LIKE ?)", pattern, pattern)
 	}
 
-	rows, err := d.conn.QueryContext(ctx, query, args...)
-	if err != nil {
+	var records []articleRecord
+	if err := query.Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("query articles failed: %w", err)
 	}
-	defer rows.Close()
-
-	var articles []*model.Article
-	for rows.Next() {
-		var a model.Article
-		var tagsJSON string
-		var pubVal, createdVal any
-
-		if err := rows.Scan(
-			&a.ID,
-			&a.Source,
-			&a.Title,
-			&a.Link,
-			&a.Summary,
-			&a.Score,
-			&tagsJSON,
-			&pubVal,
-			&createdVal,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan article row: %w", err)
-		}
-
-		if err := json.Unmarshal([]byte(tagsJSON), &a.Tags); err != nil {
-			a.Tags = []string{}
-		}
-
-		a.PublishedAt = parseDBTime(pubVal)
-		a.CreatedAt = parseDBTime(createdVal)
-
-		articles = append(articles, &a)
+	articles := make([]*model.Article, 0, len(records))
+	for _, record := range records {
+		articles = append(articles, record.model())
 	}
-
 	return articles, nil
 }
 
@@ -742,41 +660,36 @@ func (d *DB) GetStats(ctx context.Context) (Stats, error) {
 // ToggleSubscription toggles a user's subscription to a specific tag.
 func (d *DB) ToggleSubscription(ctx context.Context, chatID int64, tag string) (bool, error) {
 	tag = strings.TrimSpace(tag)
-
-	var exists int
-	err := d.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_subscriptions WHERE chat_id = ? AND LOWER(tag) = LOWER(?)", chatID, tag).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("subscription check error: %w", err)
+	tag = strings.ToLower(tag)
+	var subscription subscriptionRecord
+	result := d.gormDB.WithContext(ctx).Where("chat_id = ? AND LOWER(tag) = LOWER(?)", chatID, tag).First(&subscription)
+	if result.Error == nil {
+		if err := d.gormDB.WithContext(ctx).Delete(&subscription).Error; err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return false, fmt.Errorf("subscription check error: %w", result.Error)
 	}
 
-	if exists > 0 {
-		_, err := d.conn.ExecContext(ctx, "DELETE FROM user_subscriptions WHERE chat_id = ? AND LOWER(tag) = LOWER(?)", chatID, tag)
-		return false, err
-	}
-
-	_, err = d.conn.ExecContext(ctx,
-		"INSERT INTO user_subscriptions (chat_id, tag, created_at) VALUES (?, ?, ?)",
-		chatID, strings.ToLower(tag), time.Now().UTC(),
-	)
+	err := d.gormDB.WithContext(ctx).Create(&subscriptionRecord{
+		ChatID: chatID, Tag: tag, CreatedAt: time.Now().UTC(),
+	}).Error
 	return true, err
 }
 
 // GetUserSubscriptions returns the active subscription tags for a chat ID.
 func (d *DB) GetUserSubscriptions(ctx context.Context, chatID int64) ([]string, error) {
-	rows, err := d.conn.QueryContext(ctx, "SELECT tag FROM user_subscriptions WHERE chat_id = ?", chatID)
-	if err != nil {
+	var subscriptions []subscriptionRecord
+	if err := d.gormDB.WithContext(ctx).Where("chat_id = ?", chatID).Find(&subscriptions).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var tags []string
-	for rows.Next() {
-		var tag string
-		if err := rows.Scan(&tag); err == nil {
-			cleanTag := strings.ToLower(strings.TrimSpace(tag))
-			if cleanTag != "" {
-				tags = append(tags, cleanTag)
-			}
+	tags := make([]string, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		cleanTag := strings.ToLower(strings.TrimSpace(subscription.Tag))
+		if cleanTag != "" {
+			tags = append(tags, cleanTag)
 		}
 	}
 	return tags, nil
@@ -784,19 +697,13 @@ func (d *DB) GetUserSubscriptions(ctx context.Context, chatID int64) ([]string, 
 
 // GetAllSubscribers returns a mapping of chat IDs to subscribed tags.
 func (d *DB) GetAllSubscribers(ctx context.Context) (map[int64][]string, error) {
-	rows, err := d.conn.QueryContext(ctx, "SELECT chat_id, tag FROM user_subscriptions")
-	if err != nil {
+	var subscriptions []subscriptionRecord
+	if err := d.gormDB.WithContext(ctx).Find(&subscriptions).Error; err != nil {
 		return nil, fmt.Errorf("failed to query all subscribers: %w", err)
 	}
-	defer rows.Close()
-
 	subscribers := make(map[int64][]string)
-	for rows.Next() {
-		var chatID int64
-		var tag string
-		if err := rows.Scan(&chatID, &tag); err == nil {
-			subscribers[chatID] = append(subscribers[chatID], tag)
-		}
+	for _, subscription := range subscriptions {
+		subscribers[subscription.ChatID] = append(subscribers[subscription.ChatID], subscription.Tag)
 	}
 
 	return subscribers, nil
@@ -808,30 +715,21 @@ func (d *DB) GetSubscribersForTags(ctx context.Context, tags []string) ([]int64,
 		return nil, nil
 	}
 
-	placeholders := make([]string, len(tags))
-	args := make([]any, len(tags))
-	for i, t := range tags {
-		placeholders[i] = "?"
-		args[i] = strings.ToLower(strings.TrimSpace(t))
+	cleanTags := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		cleanTags = append(cleanTags, strings.ToLower(strings.TrimSpace(tag)))
 	}
 
-	query := fmt.Sprintf(`
-		SELECT DISTINCT chat_id 
-		FROM user_subscriptions 
-		WHERE tag IN (%s);
-	`, strings.Join(placeholders, ","))
-
-	rows, err := d.conn.QueryContext(ctx, query, args...)
-	if err != nil {
+	var subscriptions []subscriptionRecord
+	if err := d.gormDB.WithContext(ctx).Where("tag IN ?", cleanTags).Find(&subscriptions).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var chatIDs []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err == nil {
-			chatIDs = append(chatIDs, id)
+	chatIDs := make([]int64, 0, len(subscriptions))
+	seen := make(map[int64]struct{})
+	for _, subscription := range subscriptions {
+		if _, ok := seen[subscription.ChatID]; !ok {
+			seen[subscription.ChatID] = struct{}{}
+			chatIDs = append(chatIDs, subscription.ChatID)
 		}
 	}
 	return chatIDs, nil
@@ -1018,22 +916,20 @@ func (d *DB) SaveIoCs(ctx context.Context, articleID int64, threatContext, sourc
 		return nil
 	}
 
-	stmt, err := d.conn.PrepareContext(ctx, `
-		INSERT IGNORE INTO iocs (article_id, type, value, threat_context, source, first_seen)
-		VALUES (?, ?, ?, ?, ?, ?);
-	`)
-	if err != nil {
-		return fmt.Errorf("prepare ioc insert failed: %w", err)
-	}
-	defer stmt.Close()
-
 	now := time.Now().UTC()
 	for _, item := range iocs {
 		val := strings.TrimSpace(item.Value)
 		if val == "" {
 			continue
 		}
-		_, _ = stmt.ExecContext(ctx, articleID, item.Type, val, threatContext, source, now)
+		record := iocRecord{
+			ArticleID: articleID, Type: item.Type, Value: val,
+			ThreatContext: threatContext, Source: source, FirstSeen: now,
+		}
+		if err := d.gormDB.WithContext(ctx).
+			Clauses(clause.OnConflict{DoNothing: true}).Create(&record).Error; err != nil {
+			return fmt.Errorf("insert ioc failed: %w", err)
+		}
 	}
 	return nil
 }

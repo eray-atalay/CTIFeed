@@ -86,96 +86,138 @@ export default function IocPoolModal() {
   };
 
   return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-card-border)', borderRadius: 'var(--radius-lg)', padding: '20px' }}>
-      <div className="ioc-modal-header-top" style={{ marginBottom: '16px' }}>
-        <div className="ioc-export-actions">
-          <a href="/api/iocs/export?format=txt" download="ctifeed-blocklist.txt" className="btn-secondary btn-export">
-            <span>TXT İndir</span>
-          </a>
-          <a href="/api/iocs/export?format=csv" download="ctifeed-iocs.csv" className="btn-primary btn-export">
-            <span>CSV İndir</span>
-          </a>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '20px', paddingBottom: '40px' }}>
+      {/* Üst Bilgi ve Filtreleme Kartı */}
+      <div style={{ background: 'linear-gradient(135deg, rgba(14, 20, 34, 0.9) 0%, rgba(10, 15, 26, 0.95) 100%)', border: '1px solid rgba(56, 189, 248, 0.15)', borderRadius: 'var(--radius-lg)', padding: '24px', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '18px' }}>
+          <div>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#fff', margin: '0 0 6px 0', letterSpacing: '-0.02em' }}>
+              Tehdit Göstergeleri (IoC) Havuzu
+            </h1>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>
+              Toplanan istihbarat haberlerinden otomatik ayıklanan IP, Domain ve Hash kayıtları.
+            </p>
+          </div>
+          <div className="ioc-export-actions" style={{ display: 'flex', gap: '10px' }}>
+            <a href="/api/iocs/export?format=txt" download="ctifeed-blocklist.txt" className="btn-secondary btn-export" style={{ padding: '8px 14px', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', textDecoration: 'none' }}>
+              <span>TXT İndir</span>
+            </a>
+            <a href="/api/iocs/export?format=csv" download="ctifeed-iocs.csv" className="btn-primary btn-export" style={{ padding: '8px 14px', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', textDecoration: 'none' }}>
+              <span>CSV İndir</span>
+            </a>
+          </div>
         </div>
-      </div>
 
-      <div className="ioc-filters-bar" style={{ marginBottom: '16px' }}>
-        <div className="ioc-type-pills">
-          <button className={`pill ${selectedType === '' ? 'active' : ''}`} onClick={() => handleTypeChange('')}>
+        {/* Filtreleme Hapları (Pills) */}
+        <div className="ioc-type-pills" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px', paddingBottom: '14px', borderBottom: '1px solid rgba(56, 189, 248, 0.1)' }}>
+          <button className={`pill ${selectedType === '' ? 'active' : ''}`} onClick={() => handleTypeChange('')} style={{ fontSize: '0.8rem', padding: '6px 12px', borderRadius: 'var(--radius-md)', cursor: 'pointer', border: selectedType === '' ? '1px solid #38bdf8' : '1px solid var(--bg-card-border)', background: selectedType === '' ? 'rgba(56, 189, 248, 0.15)' : '#070b14', color: selectedType === '' ? '#38bdf8' : 'var(--text-secondary)', fontWeight: selectedType === '' ? '600' : '500' }}>
             Tümü ({counts.all})
           </button>
-          <button className={`pill pill-ip ${selectedType === 'ip' ? 'active' : ''}`} onClick={() => handleTypeChange('ip')}>
+          <button className={`pill pill-ip ${selectedType === 'ip' ? 'active' : ''}`} onClick={() => handleTypeChange('ip')} style={{ fontSize: '0.8rem', padding: '6px 12px', borderRadius: 'var(--radius-md)', cursor: 'pointer', border: selectedType === 'ip' ? '1px solid #38bdf8' : '1px solid var(--bg-card-border)', background: selectedType === 'ip' ? 'rgba(56, 189, 248, 0.15)' : '#070b14', color: selectedType === 'ip' ? '#38bdf8' : 'var(--text-secondary)', fontWeight: selectedType === 'ip' ? '600' : '500' }}>
             IP Adresleri ({counts.ip})
           </button>
-          <button className={`pill pill-domain ${selectedType === 'domain' ? 'active' : ''}`} onClick={() => handleTypeChange('domain')}>
+          <button className={`pill pill-domain ${selectedType === 'domain' ? 'active' : ''}`} onClick={() => handleTypeChange('domain')} style={{ fontSize: '0.8rem', padding: '6px 12px', borderRadius: 'var(--radius-md)', cursor: 'pointer', border: selectedType === 'domain' ? '1px solid #38bdf8' : '1px solid var(--bg-card-border)', background: selectedType === 'domain' ? 'rgba(56, 189, 248, 0.15)' : '#070b14', color: selectedType === 'domain' ? '#38bdf8' : 'var(--text-secondary)', fontWeight: selectedType === 'domain' ? '600' : '500' }}>
             Alan Adları ({counts.domain})
           </button>
-          <button className={`pill pill-hash ${selectedType === 'sha256' ? 'active' : ''}`} onClick={() => handleTypeChange('sha256')}>
+          <button className={`pill pill-hash ${selectedType === 'sha256' ? 'active' : ''}`} onClick={() => handleTypeChange('sha256')} style={{ fontSize: '0.8rem', padding: '6px 12px', borderRadius: 'var(--radius-md)', cursor: 'pointer', border: selectedType === 'sha256' ? '1px solid #38bdf8' : '1px solid var(--bg-card-border)', background: selectedType === 'sha256' ? 'rgba(56, 189, 248, 0.15)' : '#070b14', color: selectedType === 'sha256' ? '#38bdf8' : 'var(--text-secondary)', fontWeight: selectedType === 'sha256' ? '600' : '500' }}>
             SHA256 ({counts.sha256})
           </button>
-          <button className={`pill pill-hash ${selectedType === 'md5' ? 'active' : ''}`} onClick={() => handleTypeChange('md5')}>
+          <button className={`pill pill-hash ${selectedType === 'md5' ? 'active' : ''}`} onClick={() => handleTypeChange('md5')} style={{ fontSize: '0.8rem', padding: '6px 12px', borderRadius: 'var(--radius-md)', cursor: 'pointer', border: selectedType === 'md5' ? '1px solid #38bdf8' : '1px solid var(--bg-card-border)', background: selectedType === 'md5' ? 'rgba(56, 189, 248, 0.15)' : '#070b14', color: selectedType === 'md5' ? '#38bdf8' : 'var(--text-secondary)', fontWeight: selectedType === 'md5' ? '600' : '500' }}>
             MD5 ({counts.md5})
           </button>
         </div>
-        <input
-          type="text"
-          className="ioc-search-input"
-          placeholder="IoC değeri ara..."
-          value={search}
-          onInput={(e: any) => handleSearchChange(e.target.value)}
-        />
+
+        {/* Arama Çubuğu */}
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <input
+              type="text"
+              className="ioc-search-input"
+              placeholder="IoC değeri ara..."
+              value={search}
+              onInput={(e: any) => handleSearchChange(e.target.value)}
+              style={{ width: '100%', padding: '11px 16px', background: '#070b14', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: 'var(--radius-md)', color: '#fff', fontSize: '0.9rem', outline: 'none' }}
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="ioc-table-container" style={{ maxHeight: '70vh' }}>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-            Tehdit göstergeleri yükleniyor...
-          </div>
-        ) : (
-          <table className="ioc-table">
-            <thead>
-              <tr>
-                <th style={{ width: '90px' }}>Tür</th>
-                <th>Gösterge (Değer)</th>
-                <th style={{ width: '140px' }}>Kaynak</th>
-                <th>İlişkili Tehdit Bağlamı</th>
-                <th style={{ width: '110px' }}>İlk Tespit</th>
-                <th style={{ width: '80px', textAlign: 'center' }}>Eylem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {iocs.map((ioc, idx) => (
-                <tr key={ioc.id || idx}>
-                  <td>
-                    <span className={`ioc-type-badge ioc-badge-${ioc.type}`}>{ioc.type.toUpperCase()}</span>
-                  </td>
-                  <td>
-                    <span className="ioc-val">{ioc.value}</span>
-                  </td>
-                  <td>{ioc.source ? <span className="ioc-source-tag">{ioc.source}</span> : '-'}</td>
-                  <td>
-                    <div className="ioc-context">
-                      {ioc.threat_context || ioc.context || '-'}
-                    </div>
-                  </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                    {formatTimeAgo(ioc.first_seen || ioc.created_at)}
-                  </td>
-                  <td style={{ textAlign: 'center' }}>
-                    <button className={`btn-copy-ioc ${copiedVal === ioc.value ? 'copied' : ''}`} onClick={() => handleCopy(ioc.value)}>
-                      <span>{copiedVal === ioc.value ? 'Kopyalandı!' : 'Kopyala'}</span>
-                    </button>
-                  </td>
+      {/* Tablo Kartı */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-card-border)', borderRadius: 'var(--radius-lg)', width: '100%', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)' }}>
+        <div style={{ width: '100%', overflowX: 'auto' }}>
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)', fontSize: '0.95rem' }}>
+              Tehdit göstergeleri güvenli belleğe yükleniyor...
+            </div>
+          ) : (
+            <table className="ioc-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', tableLayout: 'fixed' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--bg-card-border)', background: 'rgba(14, 20, 34, 0.6)' }}>
+                  <th style={{ width: '110px', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Tür</th>
+                  <th style={{ width: '240px', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Gösterge (Değer)</th>
+                  <th style={{ width: '160px', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Kaynak</th>
+                  <th style={{ padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>İlişkili Tehdit Bağlamı</th>
+                  <th style={{ width: '120px', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>İlk Tespit</th>
+                  <th style={{ width: '100px', textAlign: 'center', padding: '16px 20px', fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em' }}>Eylem</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {iocs.map((ioc, idx) => (
+                  <tr 
+                    key={ioc.id || idx}
+                    style={{ borderBottom: '1px solid var(--bg-card-border)', transition: 'background-color 0.15s ease' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.03)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                  >
+                    <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
+                      <span className={`ioc-type-badge ioc-badge-${ioc.type}`} style={{ fontSize: '0.75rem', padding: '4px 8px', borderRadius: '4px', display: 'inline-block' }}>{ioc.type.toUpperCase()}</span>
+                    </td>
+                    <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
+                      <span className="ioc-val" style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#38bdf8', wordBreak: 'break-all' }}>{ioc.value}</span>
+                    </td>
+                    <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
+                      {ioc.source ? (
+                        ioc.url ? (
+                          <a
+                            className="ioc-source-tag"
+                            href={ioc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Kaynak makaleyi aç"
+                            style={{ fontSize: '0.78rem', padding: '4px 8px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', color: '#38bdf8', textDecoration: 'none' }}
+                          >
+                            {ioc.source} ↗
+                          </a>
+                        ) : (
+                          <span className="ioc-source-tag" style={{ fontSize: '0.78rem', padding: '4px 8px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px' }}>{ioc.source}</span>
+                        )
+                      ) : '-'}
+                    </td>
+                    <td style={{ padding: '16px 20px', verticalAlign: 'middle' }}>
+                      <div className="ioc-context" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {ioc.threat_context || ioc.context || '-'}
+                      </div>
+                    </td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '16px 20px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                      {formatTimeAgo(ioc.first_seen || ioc.created_at)}
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '16px 20px', verticalAlign: 'middle' }}>
+                      <button className={`btn-copy-ioc ${copiedVal === ioc.value ? 'copied' : ''}`} onClick={() => handleCopy(ioc.value)} style={{ padding: '6px 12px', fontSize: '0.8rem', borderRadius: 'var(--radius-md)', cursor: 'pointer', background: copiedVal === ioc.value ? '#10b981' : 'rgba(56, 189, 248, 0.1)', color: copiedVal === ioc.value ? '#fff' : '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.2)', transition: 'all 0.2s' }}>
+                        <span>{copiedVal === ioc.value ? 'Kopyalandı!' : 'Kopyala'}</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
 
-        {!loading && iocs.length === 0 && (
-          <div className="ioc-empty-state">
-            <p>Eşleşen IoC kaydı bulunamadı.</p>
-          </div>
-        )}
+          {!loading && iocs.length === 0 && (
+            <div className="ioc-empty-state" style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
+              <p>Eşleşen IoC kaydı bulunamadı.</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

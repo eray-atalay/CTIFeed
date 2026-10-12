@@ -872,6 +872,95 @@ type twitterGuestTokenResponse struct {
 	GuestToken string `json:"guest_token"`
 }
 
+func parseTwitterFallbackHTML(bodyStr string, username string, twitterCutoff time.Time, sourceName string) ([]*model.Article, int) {
+	matches := xSSRRegex.FindAllStringSubmatchIndex(bodyStr, -1)
+	if len(matches) == 0 {
+		return nil, 0
+	}
+
+	var articles []*model.Article
+	oldCnt := 0
+	seenIDs := make(map[string]bool)
+
+	for _, loc := range matches {
+		if len(loc) < 10 {
+			continue
+		}
+		tsStr := bodyStr[loc[2]:loc[3]]
+		rawText := bodyStr[loc[4]:loc[5]]
+		ts, err := strconv.ParseInt(tsStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		pubDate := time.UnixMilli(ts).UTC()
+
+		afterEnd := loc[1] + 600
+		if afterEnd > len(bodyStr) {
+			afterEnd = len(bodyStr)
+		}
+		after := bodyStr[loc[1]:afterEnd]
+
+		tweetID := ""
+		if idM := xSSRIDRegex.FindStringSubmatch(after); len(idM) > 1 {
+			tweetID = idM[1]
+		} else if b64M := xSSRB64Regex.FindStringSubmatch(after); len(b64M) > 1 {
+			if dec, err := base64.StdEncoding.DecodeString(b64M[1]); err == nil {
+				tweetID = strings.TrimPrefix(string(dec), "Tweet:")
+			}
+		}
+		if tweetID == "" || seenIDs[tweetID] {
+			continue
+		}
+		seenIDs[tweetID] = true
+
+		if pubDate.Before(twitterCutoff) {
+			oldCnt++
+			continue
+		}
+
+		cleanSummary := strings.ReplaceAll(rawText, `\n`, "\n")
+		cleanSummary = strings.ReplaceAll(cleanSummary, `\"`, `"`)
+		cleanSummary = html.UnescapeString(cleanSummary)
+		cleanSummary = strings.TrimSpace(cleanSummary)
+
+		if strings.HasPrefix(cleanSummary, "RT @") || strings.HasPrefix(rawText, "RT @") {
+			continue
+		}
+		if cleanSummary == "" {
+			continue
+		}
+
+		cleanTitle := cleanSummary
+		if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
+			cleanTitle = strings.TrimSpace(cleanTitle[:idx])
+		}
+		if len(cleanTitle) > 120 {
+			cleanTitle = cleanTitle[:117] + "..."
+		}
+		if cleanTitle == "" {
+			cleanTitle = fmt.Sprintf("[%s] X Postu", sourceName)
+		}
+
+		link := fmt.Sprintf("https://x.com/%s/status/%s", username, tweetID)
+		extractedIoCs := ioc.Extract(cleanSummary)
+		scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
+
+		articles = append(articles, &model.Article{
+			Source:      sourceName,
+			Title:       cleanTitle,
+			Link:        link,
+			Summary:     cleanSummary,
+			Score:       scoringResult.Score,
+			Tags:        scoringResult.Tags,
+			PublishedAt: pubDate.UTC(),
+			CreatedAt:   time.Now().UTC(),
+			IoCs:        extractedIoCs,
+		})
+	}
+
+	return articles, oldCnt
+}
+
 func (c *Collector) fetchTwitterGraphQL(ctx context.Context, username string, cutoff time.Time, sourceName string) ([]*model.Article, int, error) {
 	const queryID = "PNd0vlufvrcIwrAnBYKE9g"
 	const maxPages = 25
@@ -967,6 +1056,11 @@ func (c *Collector) fetchTwitterGraphQL(ctx context.Context, username string, cu
 		pageItems := 0
 		pageRecentItems := 0
 		pageOldItems := 0
+		slog.Debug("Twitter GraphQL page processed",
+			slog.String("username", username),
+			slog.String("cursor", cursor),
+			slog.Int("page", page),
+		)
 		for _, instruction := range payload.Data.User.Result.Timeline.Timeline.Instructions {
 			entries := instruction.Entries
 			if instruction.Entry.Content.EntryType != "" ||
@@ -1032,6 +1126,14 @@ func (c *Collector) fetchTwitterGraphQL(ctx context.Context, username string, cu
 				}
 			}
 		}
+		slog.Debug("Twitter GraphQL page summary",
+			slog.String("username", username),
+			slog.Int("page", page),
+			slog.Int("page_items", pageItems),
+			slog.Int("recent_items", pageRecentItems),
+			slog.Int("old_items", pageOldItems),
+			slog.Int("articles_current_count", len(articles)),
+		)
 		if pageItems == 0 || (pageOldItems > 0 && pageRecentItems == 0) {
 			break
 		}
@@ -1138,6 +1240,7 @@ func (c *Collector) fetchTwitterFeed(parentCtx context.Context, src model.FeedSo
 
 	if articles, oldCnt, err := c.fetchTwitterGraphQL(ctx, username, twitterCutoff, src.Name); err == nil {
 		if len(articles) > 0 {
+			slog.Debug("Twitter fetch succeeded via GraphQL", slog.String("username", username), slog.Int("articles", len(articles)), slog.Int("old_items", oldCnt))
 			return articles, oldCnt, nil
 		}
 		slog.Warn("Twitter GraphQL returned no recent articles", slog.String("username", username))
@@ -1159,88 +1262,16 @@ func (c *Collector) fetchTwitterFeed(parentCtx context.Context, src model.FeedSo
 				resp.Body.Close()
 				if err == nil {
 					bodyStr := string(body)
-					matches := xSSRRegex.FindAllStringSubmatchIndex(bodyStr, -1)
-					if len(matches) > 0 {
-						var articles []*model.Article
-						oldCnt := 0
-						seenIDs := make(map[string]bool)
-
-						for _, loc := range matches {
-							tsStr := bodyStr[loc[2]:loc[3]]
-							rawText := bodyStr[loc[4]:loc[5]]
-							ts, err := strconv.ParseInt(tsStr, 10, 64)
-							if err != nil {
-								continue
-							}
-							pubDate := time.UnixMilli(ts).UTC()
-
-							afterEnd := loc[1] + 600
-							if afterEnd > len(bodyStr) {
-								afterEnd = len(bodyStr)
-							}
-							after := bodyStr[loc[1]:afterEnd]
-
-							tweetID := ""
-							if idM := xSSRIDRegex.FindStringSubmatch(after); len(idM) > 1 {
-								tweetID = idM[1]
-							} else if b64M := xSSRB64Regex.FindStringSubmatch(after); len(b64M) > 1 {
-								if dec, err := base64.StdEncoding.DecodeString(b64M[1]); err == nil {
-									tweetID = strings.TrimPrefix(string(dec), "Tweet:")
-								}
-							}
-							if tweetID == "" || seenIDs[tweetID] {
-								continue
-							}
-							seenIDs[tweetID] = true
-
-							if pubDate.Before(twitterCutoff) {
-								oldCnt++
-								continue
-							}
-
-							cleanSummary := strings.ReplaceAll(rawText, `\n`, "\n")
-							cleanSummary = strings.ReplaceAll(cleanSummary, `\"`, `"`)
-							cleanSummary = html.UnescapeString(cleanSummary)
-							cleanSummary = strings.TrimSpace(cleanSummary)
-
-							if strings.HasPrefix(cleanSummary, "RT @") || strings.HasPrefix(rawText, "RT @") {
-								continue
-							}
-							if cleanSummary == "" {
-								continue
-							}
-
-							cleanTitle := cleanSummary
-							if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
-								cleanTitle = strings.TrimSpace(cleanTitle[:idx])
-							}
-							if len(cleanTitle) > 120 {
-								cleanTitle = cleanTitle[:117] + "..."
-							}
-							if cleanTitle == "" {
-								cleanTitle = fmt.Sprintf("[%s] X Postu", src.Name)
-							}
-
-							link := fmt.Sprintf("https://x.com/%s/status/%s", username, tweetID)
-							extractedIoCs := ioc.Extract(cleanSummary)
-							scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
-
-							articles = append(articles, &model.Article{
-								Source:      src.Name,
-								Title:       cleanTitle,
-								Link:        link,
-								Summary:     cleanSummary,
-								Score:       scoringResult.Score,
-								Tags:        scoringResult.Tags,
-								PublishedAt: pubDate.UTC(),
-								CreatedAt:   time.Now().UTC(),
-								IoCs:        extractedIoCs,
-							})
-						}
-
-						if len(articles) > 0 {
-							return articles, oldCnt, nil
-						}
+					matchCount := len(xSSRRegex.FindAllStringSubmatchIndex(bodyStr, -1))
+					articles, oldCnt := parseTwitterFallbackHTML(bodyStr, username, twitterCutoff, src.Name)
+					slog.Debug("Twitter auth fallback parsed articles",
+						slog.String("username", username),
+						slog.Int("html_matches", matchCount),
+						slog.Int("articles", len(articles)),
+						slog.Int("old_items", oldCnt),
+					)
+					if len(articles) > 0 {
+						return articles, oldCnt, nil
 					}
 				}
 			} else if resp != nil {

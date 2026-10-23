@@ -261,3 +261,70 @@ func TestAPIEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleGetSources_HidesLastErrorForNormalUsers(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.AdminJWTSecret = "test-secret-at-least-32-bytes-long!!"
+	cfg.Sources = []model.FeedSource{
+		{
+			Name:       "Test Broken Feed",
+			URL:        "https://example.com/rss",
+			LastStatus: "error",
+			LastError:  "HTTP 500 Internal Server Error (connection refused)",
+		},
+	}
+	srv := NewServer(cfg, nil, nil, ":0")
+
+	// 1. Normal user (no admin cookie) -> LastError should be empty
+	req := httptest.NewRequest("GET", "/api/sources", nil)
+	rec := httptest.NewRecorder()
+	srv.server.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var normalResp struct {
+		Sources []model.FeedSource `json:"sources"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&normalResp); err != nil {
+		t.Fatalf("json decode failed: %v", err)
+	}
+	if len(normalResp.Sources) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(normalResp.Sources))
+	}
+	if normalResp.Sources[0].LastError != "" {
+		t.Errorf("expected LastError to be hidden for normal user, got %q", normalResp.Sources[0].LastError)
+	}
+
+	// 2. Admin user (with valid admin cookie) -> LastError should be visible
+	token, err := signAdminToken(cfg.AdminJWTSecret, "admin", time.Hour)
+	if err != nil {
+		t.Fatalf("failed to sign admin token: %v", err)
+	}
+	adminReq := httptest.NewRequest("GET", "/api/sources", nil)
+	adminReq.AddCookie(&http.Cookie{
+		Name:  adminTokenCookie,
+		Value: token,
+	})
+	adminRec := httptest.NewRecorder()
+	srv.server.Handler.ServeHTTP(adminRec, adminReq)
+
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", adminRec.Code)
+	}
+
+	var adminResp struct {
+		Sources []model.FeedSource `json:"sources"`
+	}
+	if err := json.NewDecoder(adminRec.Body).Decode(&adminResp); err != nil {
+		t.Fatalf("json decode failed: %v", err)
+	}
+	if len(adminResp.Sources) != 1 {
+		t.Fatalf("expected 1 source, got %d", len(adminResp.Sources))
+	}
+	if adminResp.Sources[0].LastError != "HTTP 500 Internal Server Error (connection refused)" {
+		t.Errorf("expected LastError to be visible for admin, got %q", adminResp.Sources[0].LastError)
+	}
+}
+

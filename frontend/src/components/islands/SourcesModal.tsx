@@ -302,7 +302,7 @@ export default function SourcesModal() {
                         status === 'ok'
                           ? 'Kaynak Sağlıklı'
                           : status === 'error'
-                          ? `Hata: ${src.last_error || 'Bağlantı kurulamadı'}`
+                          ? (isAdmin && src.last_error ? `Hata: ${src.last_error}` : 'Erişim sağlanamıyor')
                           : 'Henüz taranmadı'
                       }
                     />
@@ -319,12 +319,12 @@ export default function SourcesModal() {
                   </div>
                   <div className="source-meta-row" style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '16px' }}>
                     <span className="source-cat" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{src.category || 'Genel CTI'}</span>
-                    {src.last_error && status === 'error' && (
+                    {status === 'error' && (
                       <span
                         style={{ fontSize: '0.72rem', color: '#f87171', wordBreak: 'break-word', lineHeight: '1.3' }}
-                        title={src.last_error}
+                        title={isAdmin && src.last_error ? src.last_error : 'Erişim sağlanamıyor'}
                       >
-                        {src.last_error}
+                        {isAdmin && src.last_error ? src.last_error : 'Erişim sağlanamıyor'}
                       </span>
                     )}
                   </div>

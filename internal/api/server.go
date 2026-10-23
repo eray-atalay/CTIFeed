@@ -124,13 +124,15 @@ func NewServer(cfg *config.Config, db *storage.DB, col *collector.Collector, add
 	}
 
 	// One-time background IoC index backfill for existing articles
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if count, err := db.BackfillIoCs(ctx, ioc.Extract); err == nil && count > 0 {
-			slog.Info("IoC index backfill completed", slog.Int("extracted_iocs", count))
-		}
-	}()
+	if db != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if count, err := db.BackfillIoCs(ctx, ioc.Extract); err == nil && count > 0 {
+				slog.Info("IoC index backfill completed", slog.Int("extracted_iocs", count))
+			}
+		}()
+	}
 
 	return s
 }
@@ -314,6 +316,16 @@ func (s *Server) handleGetSources(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil || len(sources) == 0 {
 		sources = s.cfg.Sources
+	}
+
+	_, isAdmin := s.adminTokenFromRequest(r)
+	if !isAdmin {
+		sanitized := make([]model.FeedSource, len(sources))
+		for i, src := range sources {
+			src.LastError = ""
+			sanitized[i] = src
+		}
+		sources = sanitized
 	}
 
 	resp := map[string]any{

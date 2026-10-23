@@ -200,14 +200,11 @@ func main() {
 		server.SetNotifier(tgBot)
 	}
 
-	// Trigger initial background scan if DB is empty
-	stats, err := db.GetStats(ctx)
-	if err == nil && stats.TotalArticles == 0 {
-		slog.Info("Database is empty. Starting initial feed collection cycle in background...")
-		go func() {
-			_, _, _ = server.TriggerScan(context.Background())
-		}()
-	}
+	// Trigger initial background scan on server startup
+	slog.Info("Starting initial feed collection cycle in background...")
+	go func() {
+		_, _, _ = server.TriggerScan(context.Background())
+	}()
 
 	// Background ticker for scheduled scans
 	if cfg.Interval > 0 {

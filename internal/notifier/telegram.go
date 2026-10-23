@@ -431,9 +431,10 @@ func formatArticleCard(a *model.Article) string {
 		tagsText = fmt.Sprintf("\n🏷️ <b>Etiketler:</b> <i>%s</i>", html.EscapeString(strings.Join(a.Tags, ", ")))
 	}
 
-	summary := a.Summary
-	if len(summary) > 200 {
-		summary = summary[:197] + "..."
+	summary := strings.ToValidUTF8(a.Summary, "")
+	r := []rune(summary)
+	if len(r) > 200 {
+		summary = string(r[:197]) + "..."
 	}
 
 	// Buton eklenmiş şık kart tasarımı

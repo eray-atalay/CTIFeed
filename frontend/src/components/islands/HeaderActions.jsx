@@ -18,8 +18,11 @@ export default function HeaderActions() {
       setTimeout(() => setBannerMsg(null), 5000);
     } catch (err) {
       console.error('Tarama hatası:', err);
-      setBannerMsg(`Tarama hatası: ${err.message || 'Bilinmeyen hata'}`);
-      setTimeout(() => setBannerMsg(null), 4000);
+      const msg = (err.message && err.message.toLowerCase().includes('admin'))
+        ? 'Manuel tarama için Admin girişi gereklidir.'
+        : `Tarama hatası: ${err.message || 'Bilinmeyen hata'}`;
+      setBannerMsg(msg);
+      setTimeout(() => setBannerMsg(null), 5000);
     } finally {
       setIsScanning(false);
     }

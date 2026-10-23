@@ -25,6 +25,19 @@ import (
 	"ctifeed/internal/scorer"
 )
 
+// truncateRunes safely truncates a string to at most maxRunes without splitting multi-byte UTF-8 sequences.
+func truncateRunes(s string, maxRunes int) string {
+	s = strings.ToValidUTF8(s, "")
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	if maxRunes > 3 {
+		return string(r[:maxRunes-3]) + "..."
+	}
+	return string(r[:maxRunes])
+}
+
 // TelegramCursorProvider supplies the latest known post ID from persistent storage.
 type TelegramCursorProvider interface {
 	GetLatestTelegramPostID(ctx context.Context, source string) (int, error)
@@ -337,9 +350,7 @@ func (c *Collector) fetchTelegramFeed(parentCtx context.Context, src model.FeedS
 
 		lines := strings.Split(cleanSummary, "\n")
 		cleanTitle := strings.TrimSpace(lines[0])
-		if len(cleanTitle) > 120 {
-			cleanTitle = cleanTitle[:117] + "..."
-		}
+		cleanTitle = truncateRunes(cleanTitle, 120)
 		if cleanTitle == "" {
 			cleanTitle = fmt.Sprintf("[%s] Yeni Tehdit", src.Name)
 		}
@@ -598,9 +609,7 @@ func (c *Collector) fetchTelegramByID(ctx context.Context, src model.FeedSource,
 				lines := strings.Split(rawText, "\n")
 				title = strings.TrimSpace(lines[0])
 			}
-			if len(title) > 120 {
-				title = title[:117] + "..."
-			}
+			title = truncateRunes(title, 120)
 
 			pubDate := time.Now().UTC()
 			if tSub := timeRegex.FindStringSubmatch(htmlStr); len(tSub) > 1 {
@@ -767,9 +776,7 @@ func (c *Collector) fetchFeed(parentCtx context.Context, src model.FeedSource) (
 		fullText := cleanTitle + " " + item.Description + " " + item.Content
 		extractedIoCs := ioc.Extract(fullText)
 
-		if len(cleanSummary) > 500 {
-			cleanSummary = cleanSummary[:497] + "..."
-		}
+		cleanSummary = truncateRunes(cleanSummary, 500)
 
 		scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
 
@@ -934,9 +941,7 @@ func parseTwitterFallbackHTML(bodyStr string, username string, twitterCutoff tim
 		if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
 			cleanTitle = strings.TrimSpace(cleanTitle[:idx])
 		}
-		if len(cleanTitle) > 120 {
-			cleanTitle = cleanTitle[:117] + "..."
-		}
+		cleanTitle = truncateRunes(cleanTitle, 120)
 		if cleanTitle == "" {
 			cleanTitle = fmt.Sprintf("[%s] X Postu", sourceName)
 		}
@@ -1098,9 +1103,7 @@ func (c *Collector) fetchTwitterGraphQL(ctx context.Context, username string, cu
 				if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
 					cleanTitle = strings.TrimSpace(cleanTitle[:idx])
 				}
-				if len(cleanTitle) > 120 {
-					cleanTitle = cleanTitle[:117] + "..."
-				}
+				cleanTitle = truncateRunes(cleanTitle, 120)
 				scoringResult := scorer.Evaluate(cleanTitle, cleanSummary)
 				article := &model.Article{
 					Source:      sourceName,
@@ -1348,9 +1351,7 @@ func (c *Collector) fetchTwitterFeed(parentCtx context.Context, src model.FeedSo
 		if idx := strings.Index(cleanTitle, "\n"); idx != -1 {
 			cleanTitle = strings.TrimSpace(cleanTitle[:idx])
 		}
-		if len(cleanTitle) > 120 {
-			cleanTitle = cleanTitle[:117] + "..."
-		}
+		cleanTitle = truncateRunes(cleanTitle, 120)
 		if cleanTitle == "" {
 			cleanTitle = fmt.Sprintf("[%s] X Postu", src.Name)
 		}

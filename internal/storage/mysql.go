@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -72,6 +73,20 @@ func (articleRecord) TableName() string {
 	return "articles"
 }
 
+func sanitizeUTF8(s string, maxRunes int) string {
+	s = strings.ToValidUTF8(s, "")
+	if maxRunes > 0 {
+		r := []rune(s)
+		if len(r) > maxRunes {
+			if maxRunes > 3 {
+				return string(r[:maxRunes-3]) + "..."
+			}
+			return string(r[:maxRunes])
+		}
+	}
+	return s
+}
+
 func newArticleRecord(article *model.Article) (articleRecord, error) {
 	tagsJSON, err := json.Marshal(article.Tags)
 	if err != nil {
@@ -79,10 +94,10 @@ func newArticleRecord(article *model.Article) (articleRecord, error) {
 	}
 	return articleRecord{
 		ID:          article.ID,
-		Source:      article.Source,
-		Title:       article.Title,
-		Link:        article.Link,
-		Summary:     article.Summary,
+		Source:      sanitizeUTF8(article.Source, 255),
+		Title:       sanitizeUTF8(article.Title, 512),
+		Link:        sanitizeUTF8(article.Link, 512),
+		Summary:     strings.ToValidUTF8(article.Summary, ""),
 		Score:       article.Score,
 		Tags:        string(tagsJSON),
 		PublishedAt: article.PublishedAt.UTC(),
@@ -379,28 +394,31 @@ func (d *DB) SaveArticle(ctx context.Context, article *model.Article) (bool, err
 	return false, nil
 }
 
-// SaveArticles writes a slice of articles and their extracted IoCs in a single transaction.
+// SaveArticles writes a slice of articles and their extracted IoCs.
 func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, int, error) {
 	now := time.Now().UTC()
 	inserted := 0
 	skipped := 0
 
-	err := d.gormDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, a := range articles {
-			if a.CreatedAt.IsZero() {
-				a.CreatedAt = now
-			}
-			if a.PublishedAt.After(time.Now().Add(5 * time.Minute)) {
-				a.PublishedAt = a.CreatedAt
-			}
+	for _, a := range articles {
+		if a.CreatedAt.IsZero() {
+			a.CreatedAt = now
+		}
+		if a.PublishedAt.After(time.Now().Add(5 * time.Minute)) {
+			a.PublishedAt = a.CreatedAt
+		}
 
-			record, err := newArticleRecord(a)
-			if err != nil {
-				return err
-			}
+		record, err := newArticleRecord(a)
+		if err != nil {
+			slog.Warn("Failed to format article record", slog.String("link", a.Link), slog.String("error", err.Error()))
+			skipped++
+			continue
+		}
+
+		err = d.gormDB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
 			if result.Error != nil {
-				return fmt.Errorf("failed to insert article (%s): %w", a.Link, result.Error)
+				return result.Error
 			}
 
 			if result.RowsAffected > 0 {
@@ -424,19 +442,22 @@ func (d *DB) SaveArticles(ctx context.Context, articles []*model.Article) (int, 
 						continue
 					}
 					ioc := iocRecord{
-						ArticleID: a.ID, Type: item.Type, Value: val,
-						ThreatContext: a.Title, Source: a.Source, FirstSeen: now,
+						ArticleID:     a.ID,
+						Type:          sanitizeUTF8(item.Type, 64),
+						Value:         sanitizeUTF8(val, 512),
+						ThreatContext: sanitizeUTF8(a.Title, 512),
+						Source:        sanitizeUTF8(a.Source, 255),
+						FirstSeen:     now,
 					}
-					if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&ioc).Error; err != nil {
-						return fmt.Errorf("failed to insert ioc for article (%s): %w", a.Link, err)
-					}
+					_ = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&ioc)
 				}
 			}
+			return nil
+		})
+
+		if err != nil {
+			slog.Warn("Failed to insert article", slog.String("link", a.Link), slog.String("error", err.Error()))
 		}
-		return nil
-	})
-	if err != nil {
-		return inserted, skipped, err
 	}
 
 	return inserted, skipped, nil

@@ -1740,8 +1740,7 @@ button {
   width: 28px;
   height: 28px;
   object-fit: contain;
-  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));
-  transition: transform 0.25s ease, filter 0.25s ease;
+  transition: transform 0.25s ease;
   user-select: none;
 }
 
@@ -1760,7 +1759,6 @@ button {
 
 .sidebar-brand:hover .brand-logo-img {
   transform: scale(1.08);
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.75));
 }
 
 .brand-title h2 {

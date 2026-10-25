@@ -6,49 +6,29 @@ const currentYear = new Date().getFullYear();
 <footer class="app-footer">
   <div class="footer-container">
     <div class="footer-brand-section">
-      <a href="https://yildizcti.com.tr" target="_blank" rel="noopener noreferrer" class="footer-logo-row" title="Yıldız CTI Resmi Web Sitesi">
+      <a href="https://yildizcti.com.tr" target="_blank" rel="noopener noreferrer" class="footer-logo-row" title="Yıldız CTI">
         <div class="footer-logo-box">
           <img src="/logo.png" alt="Yıldız CTI Logo" class="footer-logo-img" />
         </div>
-        <div class="footer-brand-text">
-          <span class="footer-brand-name">Yıldız CTI</span>
-        </div>
+        <span class="footer-brand-name">Yıldız CTI</span>
       </a>
     </div>
 
-    <div class="footer-links-group">
-      <div class="footer-col">
-        <span class="footer-heading">Navigasyon</span>
-        <ul class="footer-nav-list">
-          <li><a href="/">Ana Akış & Paneller</a></li>
-          <li><a href="/radars/cve">CVE Zafiyet Radarı</a></li>
-          <li><a href="/radars/breach">Veri Sızıntısı Radarı</a></li>
-          <li><a href="/ioc-pool">IoC Tehdit Havuzu</a></li>
-        </ul>
-      </div>
-
-      <div class="footer-col">
-        <span class="footer-heading">Kurumsal & Kaynaklar</span>
-        <ul class="footer-nav-list">
-          <li>
-            <a href="https://yildizcti.com.tr" target="_blank" rel="noopener noreferrer" class="footer-domain-btn" title="Yıldız CTI">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="2" y1="12" x2="22" y2="12"></line>
-                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-              </svg>
-              <span>Yıldız CTI</span>
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" class="external-icon">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                <polyline points="15 3 21 3 21 9"></polyline>
-                <line x1="10" y1="14" x2="21" y2="3"></line>
-              </svg>
-            </a>
-          </li>
-          <li><a href="/sources">İzlenen Besleme Kaynakları</a></li>
-        </ul>
-      </div>
-    </div>
+    <nav class="footer-nav-centered" aria-label="Alt Navigasyon">
+      <a href="/">Ana Akış & Paneller</a>
+      <span class="footer-nav-dot">•</span>
+      <a href="/radars/cve">CVE Zafiyet Radarı</a>
+      <span class="footer-nav-dot">•</span>
+      <a href="/radars/breach">Veri Sızıntısı Radarı</a>
+      <span class="footer-nav-dot">•</span>
+      <a href="/ioc-pool">IoC Tehdit Havuzu</a>
+      <span class="footer-nav-dot">•</span>
+      <a href="/sources">İzlenen Kaynaklar</a>
+      <span class="footer-nav-dot">•</span>
+      <a href="https://yildizcti.com.tr" target="_blank" rel="noopener noreferrer" class="footer-domain-inline-link">
+        Yıldız CTI ↗
+      </a>
+    </nav>
   </div>
 
   <div class="footer-bottom-bar">

@@ -1953,7 +1953,13 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.footer-logo-row:hover .footer-brand-name {
+  color: #38bdf8;
 }
 
 .footer-logo-box {
@@ -1966,6 +1972,11 @@ button {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: border-color var(--transition-fast);
+}
+
+.footer-logo-row:hover .footer-logo-box {
+  border-color: #2563eb;
 }
 
 .footer-logo-img {
@@ -1985,19 +1996,7 @@ button {
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.2;
-}
-
-.footer-brand-desc {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
-}
-
-.footer-subtext {
-  font-size: 0.825rem;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  margin-top: 6px;
+  transition: color var(--transition-fast);
 }
 
 .footer-links-group {
@@ -2078,58 +2077,22 @@ button {
 .footer-bottom-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 14px;
-}
-
-.footer-domain-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.domain-pulse-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #38bdf8;
-}
-
-.footer-domain-text-link {
-  font-size: 0.8rem;
-  font-family: var(--font-mono);
-  color: #93c5fd;
-  text-decoration: none;
-  font-weight: 500;
-  transition: color var(--transition-fast);
-}
-
-.footer-domain-text-link:hover {
-  color: #ffffff;
-  text-decoration: underline;
+  justify-content: center;
+  text-align: center;
 }
 
 .footer-copy {
-  font-size: 0.8rem;
+  font-size: 0.825rem;
   color: var(--text-muted);
 }
 
-.footer-copy strong {
-  color: var(--text-secondary);
+.footer-copy-link {
+  color: #93c5fd;
+  text-decoration: none;
+  transition: color var(--transition-fast);
 }
 
-.footer-system-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-.status-indicator-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #22c55e;
+.footer-copy-link:hover {
+  color: #ffffff;
+  text-decoration: underline;
 }

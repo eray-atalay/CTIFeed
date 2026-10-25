@@ -1711,6 +1711,56 @@ button {
   padding-bottom: 20px;
   border-bottom: 1px solid var(--bg-card-border);
   margin-bottom: 20px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.sidebar-brand:hover {
+  text-decoration: none;
+}
+
+.brand-logo-container {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: all 0.25s ease;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.brand-logo-img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));
+  transition: transform 0.25s ease, filter 0.25s ease;
+  user-select: none;
+}
+
+.brand-logo-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(56, 189, 248, 0.18) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.sidebar-brand:hover .brand-logo-container {
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.sidebar-brand:hover .brand-logo-img {
+  transform: scale(1.08);
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.75));
 }
 
 .brand-title h2 {

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="img/logo.png" alt="CTIFeed Logo" width="130" height="130" />
+</p>
+
 # CTIFeed - Cyber Threat Intelligence (CTI) Aggregator & ThreatRadar
 
 **CTIFeed**, siber tehdit istihbaratı (Cyber Threat Intelligence) kaynaklarından RSS/Atom beslemelerini, Twitter/X köprüsünü ve Telegram kanallarını eşzamanlı toplayan, toplanan verileri kural tabanlı dinamik puanlama motoruyla önceliklendiren, içeriklerden otomatik Tehdit Göstergeleri (IoC) çıkaran, MySQL/GORM altyapısına sahip ve modern Astro/Preact web arayüzü sunan Go tabanlı kurumsal bir CTI platformudur.

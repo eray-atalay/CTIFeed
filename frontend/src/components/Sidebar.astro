@@ -3,19 +3,16 @@
 const currentPath = Astro.url.pathname;
 ---
 <aside class="sidebar">
-  <div class="sidebar-brand">
-    <div class="radar-pulse-icon">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="9"></circle>
-        <path d="M12 3v9l6 6"></path>
-        <circle cx="12" cy="12" r="3" fill="currentColor"></circle>
-      </svg>
+  <a href="/" class="sidebar-brand" title="CTIFeed Tehdit Radarı">
+    <div class="brand-logo-container">
+      <img src="/logo.png" alt="CTIFeed Logo" class="brand-logo-img" />
+      <div class="brand-logo-glow"></div>
     </div>
     <div class="brand-title">
       <h2>CTIFeed</h2>
       <span>Tehdit Radarı</span>
     </div>
-  </div>
+  </a>
 
   <nav class="sidebar-nav">
     <a href="/" class={`nav-item ${currentPath === '/' ? 'active' : ''}`}>

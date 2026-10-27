@@ -1702,63 +1702,42 @@ button {
   flex-direction: column;
   flex-shrink: 0;
   padding: 20px 16px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: visible;
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--bg-card-border);
   margin-bottom: 20px;
-  text-decoration: none;
-  cursor: pointer;
-  transition: opacity var(--transition-fast);
+  min-height: 52px;
 }
 
-.sidebar-brand:hover {
-  text-decoration: none;
-}
-
-.brand-logo-container {
-  position: relative;
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+.brand-info {
   display: flex;
   align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 16px rgba(56, 189, 248, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transition: all 0.25s ease;
-  flex-shrink: 0;
+  gap: 12px;
   overflow: hidden;
+  white-space: nowrap;
+  transition: gap 0.3s ease;
 }
 
-.brand-logo-img {
-  width: 28px;
-  height: 28px;
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   object-fit: contain;
-  transition: transform 0.25s ease;
-  user-select: none;
+  flex-shrink: 0;
 }
 
-.brand-logo-glow {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at center, rgba(56, 189, 248, 0.18) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-.sidebar-brand:hover .brand-logo-container {
-  border-color: rgba(56, 189, 248, 0.55);
-  box-shadow: 0 0 20px rgba(56, 189, 248, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
-}
-
-.sidebar-brand:hover .brand-logo-img {
-  transform: scale(1.08);
+.brand-title {
+  overflow: hidden;
+  opacity: 1;
+  max-width: 180px;
+  transition: opacity 0.2s ease 0.1s, max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .brand-title h2 {
@@ -1775,11 +1754,42 @@ button {
   letter-spacing: 0.05em;
 }
 
+.sidebar-toggle-btn {
+  position: absolute;
+  right: -14px;
+  top: 28px;
+  z-index: 20;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--bg-card-border);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+}
+
+.sidebar-toggle-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 2px 0 12px rgba(59, 130, 246, 0.2);
+}
+
+.sidebar-toggle-btn svg {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -1793,7 +1803,20 @@ button {
   text-decoration: none;
   font-size: 0.875rem;
   font-weight: 500;
-  transition: all var(--transition-fast);
+  transition: all 0.2s ease, gap 0.3s ease, padding 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.nav-item svg {
+  flex-shrink: 0;
+}
+
+.nav-item span {
+  overflow: hidden;
+  opacity: 1;
+  max-width: 200px;
+  transition: opacity 0.2s ease 0.1s, max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .nav-item:hover {
@@ -1807,21 +1830,53 @@ button {
   border: 1px solid #3b82f6;
 }
 
-.sidebar-footer {
-  padding-top: 16px;
-  border-top: 1px solid var(--bg-card-border);
+.sidebar.collapsed {
+  width: 72px;
+  padding: 20px 12px;
 }
 
-.telegram-link {
-  color: #38bdf8;
-  background: rgba(14, 165, 233, 0.1);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+.sidebar.collapsed .brand-info {
+  justify-content: center;
+  gap: 0;
 }
 
-.telegram-link:hover {
-  background: rgba(14, 165, 233, 0.2);
-  color: #7dd3fc;
+.sidebar.collapsed .brand-title {
+  opacity: 0;
+  max-width: 0;
 }
+
+.sidebar.collapsed .sidebar-toggle-btn svg {
+  transform: rotate(180deg);
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 0;
+  gap: 0;
+}
+
+.sidebar.collapsed .nav-item span {
+  opacity: 0;
+  max-width: 0;
+}
+
+.sidebar.collapsed .nav-scan-btn {
+  justify-content: center;
+  padding: 10px 0;
+  gap: 0;
+}
+
+.sidebar.collapsed #sidebar-scan-label {
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .nav-scan-status {
+  display: none !important;
+}
+
+
 
 /* Sidebar Manuel Tarama Butonu */
 .nav-scan-divider {
@@ -1832,7 +1887,7 @@ button {
 }
 
 .nav-scan-btn {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -1846,7 +1901,20 @@ button {
   font-weight: 600;
   cursor: pointer;
   text-align: left;
-  transition: all var(--transition-fast);
+  transition: all 0.2s ease, gap 0.3s ease, padding 0.3s ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.nav-scan-btn #sidebar-scan-label {
+  overflow: hidden;
+  opacity: 1;
+  max-width: 200px;
+  transition: opacity 0.2s ease 0.1s, max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.nav-scan-btn svg {
+  flex-shrink: 0;
 }
 
 .nav-scan-btn:hover:not(:disabled) {

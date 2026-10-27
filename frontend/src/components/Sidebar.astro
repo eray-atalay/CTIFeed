@@ -1,46 +1,43 @@
 ---
-// frontend/src/components/Sidebar.astro
 const currentPath = Astro.url.pathname;
 ---
-<aside class="sidebar">
-  <a href="/" class="sidebar-brand" title="CTIFeed Tehdit Radarı">
-    <div class="brand-logo-container">
-      <img src="/logo.png" alt="CTIFeed Logo" class="brand-logo-img" />
-      <div class="brand-logo-glow"></div>
+<aside class="sidebar" id="app-sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-info">
+      <img src="/logo.png" alt="CTIFeed" class="brand-logo" width="36" height="36" />
+      <div class="brand-title">
+        <h2>CTIFeed</h2>
+        <span>Tehdit Radarı</span>
+      </div>
     </div>
-    <div class="brand-title">
-      <h2>CTIFeed</h2>
-      <span>Tehdit Radarı</span>
-    </div>
-  </a>
+  </div>
 
   <nav class="sidebar-nav">
-    <a href="/" class={`nav-item ${currentPath === '/' ? 'active' : ''}`}>
+    <a href="/" class={`nav-item ${currentPath === '/' ? 'active' : ''}`} title="Ana Akış">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-      <span>Ana Akış & Paneller</span>
+      <span>Ana Akış</span>
     </a>
 
-    <a href="/radars/cve" class={`nav-item ${currentPath.includes('/radars/cve') ? 'active' : ''}`}>
+    <a href="/radars/cve" class={`nav-item ${currentPath.includes('/radars/cve') ? 'active' : ''}`} title="CVE Zafiyet Radarı">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
       <span>CVE Zafiyet Radarı</span>
     </a>
 
-    <a href="/radars/breach" class={`nav-item ${currentPath.includes('/radars/breach') ? 'active' : ''}`}>
+    <a href="/radars/breach" class={`nav-item ${currentPath.includes('/radars/breach') ? 'active' : ''}`} title="Data Leak Radarı">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
       <span>Data Leak Radarı</span>
     </a>
 
-    <a href="/ioc-pool" class={`nav-item ${currentPath.includes('/ioc-pool') ? 'active' : ''}`}>
+    <a href="/ioc-pool" class={`nav-item ${currentPath.includes('/ioc-pool') ? 'active' : ''}`} title="IoC Havuzu">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="22" y1="12" x2="18" y2="12"></line><line x1="6" y1="12" x2="2" y2="12"></line><line x1="12" y1="6" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="18"></line></svg>
       <span>IoC Havuzu</span>
     </a>
 
-    <a href="/sources" class={`nav-item ${currentPath.includes('/sources') ? 'active' : ''}`}>
+    <a href="/sources" class={`nav-item ${currentPath.includes('/sources') ? 'active' : ''}`} title="Kaynaklar">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
       <span>Kaynaklar</span>
     </a>
 
-    <!-- Manuel Tarama Butonu -->
     <div class="nav-scan-divider"></div>
     <button id="sidebar-scan-btn" class="nav-scan-btn" title="Tüm aktif besleme kaynaklarını şimdi tara">
       <svg id="sidebar-scan-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
@@ -52,23 +49,32 @@ const currentPath = Astro.url.pathname;
     <div id="sidebar-scan-status" class="nav-scan-status" style="display:none"></div>
   </nav>
 
-  <div class="sidebar-footer">
-    <a href="https://t.me/ctifeed_radar_bot" target="_blank" rel="noopener noreferrer" class="nav-item telegram-link">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
-      <span>Telegram Botu ↗</span>
-    </a>
-  </div>
+  <button id="sidebar-toggle-btn" class="sidebar-toggle-btn" title="Menüyü Daralt / Genişlet" aria-label="Menüyü Daralt / Genişlet">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5">
+      <polyline points="15 18 9 12 15 6"></polyline>
+    </svg>
+  </button>
 </aside>
 
 <script>
   import { triggerScan, isAdminLoggedIn } from '../services/api';
   import { triggerGlobalRefresh } from '../services/store';
 
+  const sidebar = document.getElementById('app-sidebar');
+  const toggleBtn = document.getElementById('sidebar-toggle-btn');
   const btn = document.getElementById('sidebar-scan-btn');
   const label = document.getElementById('sidebar-scan-label');
   const status = document.getElementById('sidebar-scan-status');
 
-  if (btn) btn.style.display = 'none';
+  if (localStorage.getItem('sidebar_collapsed') === 'true') {
+    sidebar?.classList.add('collapsed');
+  }
+
+  toggleBtn?.addEventListener('click', () => {
+    sidebar?.classList.toggle('collapsed');
+    const isCollapsed = sidebar?.classList.contains('collapsed');
+    localStorage.setItem('sidebar_collapsed', isCollapsed ? 'true' : 'false');
+  });
 
   isAdminLoggedIn().then((adminVisible) => {
     if (btn) btn.style.display = adminVisible ? 'flex' : 'none';
@@ -80,8 +86,8 @@ const currentPath = Astro.url.pathname;
 
       btn.disabled = true;
       btn.classList.add('scanning');
-      label.textContent = 'Taranıyor...';
-      status.style.display = 'none';
+      if (label) label.textContent = 'Taranıyor...';
+      if (status) status.style.display = 'none';
 
       try {
         const result = await triggerScan();
@@ -99,12 +105,12 @@ const currentPath = Astro.url.pathname;
       } finally {
         btn.disabled = false;
         btn.classList.remove('scanning');
-        label.textContent = 'Besleme Tara';
+        if (label) label.textContent = 'Besleme Tara';
       }
     });
   });
 
-  function showStatus(msg, type) {
+  function showStatus(msg: string, type: string) {
     if (!status) return;
     status.textContent = msg;
     status.className = 'nav-scan-status nav-scan-status--' + type;

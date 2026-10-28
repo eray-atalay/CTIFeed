@@ -241,13 +241,24 @@ export default function ThreatFeed() {
           </div>
         </div>
 
-        {/* Aktif Filtre Bilgilendirme Çubuğu */}
+        {/* Aktif Filtre Bilgilendirme ve Temizleme Satırı */}
         {activeFiltersSummary.length > 0 && (
-          <div class="active-filters-bar" id="active-filter-bar">
-            <span>Aktif Filtre: </span>
-            <strong id="filter-summary-text">{activeFiltersSummary.join(' - ')}</strong>
-            <button class="btn-clear-filters" id="btn-reset-filters" onClick={handleResetFilters}>
-              Filtreleri Temizle &times;
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 14px; padding: 0 4px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="color: var(--text-secondary, #94a3b8); font-size: 0.85rem;">Aktif Filtre:</span>
+              {activeFiltersSummary.map((item, idx) => (
+                <span key={idx} style="display: inline-flex; align-items: center; background: rgba(6, 182, 212, 0.12); border: 1px solid rgba(6, 182, 212, 0.3); color: #38bdf8; padding: 4px 12px; border-radius: 9999px; font-size: 0.825rem; font-weight: 500;">
+                  {item}
+                </span>
+              ))}
+            </div>
+            <button 
+              class="btn-clear-filters" 
+              id="btn-reset-filters" 
+              onClick={handleResetFilters}
+              style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.25); color: #fca5a5; padding: 5px 12px; border-radius: 8px; font-size: 0.825rem; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s ease;"
+            >
+              <span>&times; Filtreleri Temizle</span>
             </button>
           </div>
         )}
